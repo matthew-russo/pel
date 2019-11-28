@@ -1,0 +1,14 @@
+func main() {
+  let maybeMyName: Option<<String>> := Option<<String>> {
+    contains: "Matthew Russo",
+  };
+
+  print("Hello world");
+  print(maybeMyName.contains);
+}
+
+object Option<<T>> {
+  fields {
+    contains: T,
+  }
+}

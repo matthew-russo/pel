@@ -1,0 +1,76 @@
+type UserName := String;
+
+enum Maybe<T> {
+  variants {
+    Some(T),
+    None,
+  }
+}
+
+contract Functor<A> {
+  map<B>(func(A) -> B, Functor<A>) -> Functor<B>;
+}
+
+implement Functor<A> for Maybe<A> {
+  map<B>(fn: func(A) -> B) -> Maybe<B> {
+    match self {
+      Some(a) -> Some(fn(a)),
+      None -> None
+    }
+  }
+}
+
+object UniqueId {
+  fields {
+    id: String,
+  }
+
+  functions {
+    generate() -> Self {
+      return Self { id: "this_is_a_bad_id" };
+    }
+  }
+}
+
+
+object Account {
+  fields {
+    id: UniqueId,
+    balance: Integer,
+  }
+
+  methods {
+    public withdraw(amt: PositiveNumber) -> Result<(), Error> {
+      self.balance := self.balance - amt;
+    }
+
+    public deposit(amt: PositiveNumber) {
+      self.balance := self.balance + amt;
+    }
+  }
+}
+
+object Transfer {
+  fields {
+    src: Account,
+    dst: Account,
+  }
+
+  methods {
+    public transfer(amt: PositiveNumber) -> Result<Unit, Error> {
+      return src
+        .withdraw(amt)
+        .map(amt -> dst.deposit(amt));
+    }
+  }
+}
+
+func main() -> Result<Unit, Error> {
+  acctA := Account { id: UniqueId::generate(), balance: 10 };
+  acctB := Account { id: UniqueId::generate(), balance: 0 };
+
+  Transfer { src: acctA, dst: acctB }.transfer(7);
+
+  assert(3, acctA.getBalance());
+  assert(7, acctB.getBalance());
+}

@@ -1,0 +1,131 @@
+<program> ::= <declaration>****
+
+<declaration> ::= <type_alias> ";"
+                | <enum_declaration>
+                | <contract_declaration>
+                | <implementation_declaration>
+                | <object_declaration>
+                | <function_declaration>
+
+<type_alias> ::= "type" <identifier> ":=" <expression> 
+
+<enum_declaration> ::= "enum" <identifier> "{" <enum_body> "}"
+
+<object_declaration> ::= "object" <identifier> "{" <object_body> "}"
+
+<contract_declaration> ::= "contract" <identifier> "{" <contract_function>* "}"
+
+<contract_function> ::= <function_signature> ";"
+
+<implementation_declaration> ::= "implement" <expression> "for" <expression> "{" <function_declaration>* "}"
+
+<function_declaration> ::= <function_signature> "{" <block_body> "}"
+
+<function_signature> ::= "func" <identifier> "(" <function_parameters>? ")" <function_return>?
+<function_parameters> ::= <function_parameter>
+                        | <function_parameter> "," <function_parameters>
+<function_parameter> ::= "self"
+                       | <typed_varaible_declaration>
+<function_return> ::= "->" <expression>
+
+<enum_body> ::= <variants> <methods>? <functions>?
+
+<object_body> ::= <fields> <methods>? <functions>?
+
+<variants> ::= "variants" "{" <variant_declaration>* "}" 
+
+<variant_declaration> ::= <identifier> <variant_internal_type>? ","
+
+<variant_internal_type> ::= "(" <expression> ")"
+
+<fields> ::= "fields" "{" <field_declaration>* "}"
+
+<field_declaration> ::= <typed_variable_declaration> ","
+
+<methods> ::= "methods" "{" <method_declaration>* "}"
+<functions> ::= "functions" "{" <function_declaration>* "}"
+
+<typed_variable_declaration> ::= <identifier> ":" <expression>
+
+<block_body> ::= <statement> <block_body>? 
+               | <expression> <block_body>?
+
+<statement> ::= <variable_assignment>
+              | <return>
+<variable_assignment> ::= <identifier> ":=" <expression> ";"
+<return> ::= "return" <expression> ";"
+
+<expression> ::= <expression_start> <expression_chain>***
+
+<expression_start> ::= <conditional>
+                        | <match>
+                        | <loop>
+                        | <variable> // <identifier | self | Self
+                        | <literal>
+
+<expression_chain> ::= <field_access>
+                     | <module_access>
+                     | <enum_initialiation> // need to disambiguate this from module_access
+                     | <obj_initialization>
+                     | <call>
+                     | <binary_operation> 
+
+<binary_operation> ::= <binary_operator> <expression>
+
+<generic_identifier> ::= <identifier>
+                       | <identifier> "<" <identifier> ">"
+
+<operation> ::= <logical_operation>
+              | <arithmetic_operation>
+
+<logical_operation> ::= "!" <expression>
+                      | <expression> "||" <expression>
+                      | <expression> "&&" <expression>
+<arithmetic_operation> ::= <expression> "+" <expression>
+                         | <expression> "-" <expression>
+                         | <expression> "*" <expression>
+                         | <expression> "/" <expression>
+
+<conditional_expr> ::= <if_expr> <else_if_expr>* <else_expr>?
+<if_expr> ::= "if" <expression> "{" <block_body> "}"
+<else_if_expr> ::= "else" "if" <expression> "{" <block_body> "}"
+<else_expr> ::= "else" "{" <block_body> "}"
+
+<match_expr> ::= "match" <expression> "{" <pattern>* "}"
+<pattern>  ::= <expression> "=>" <expression>
+
+<loop> ::= "for" <variable_assignment> ";" <expression> ";" <expression> "{" <block_body> "}"
+
+<function_call> ::= <generic_identifier> "(" <function_arguments>? ")"
+
+<function_arguments> ::= <expression>
+                       | <expression> "," <function_arguments>
+
+<object_initialization> ::= <generic_identifier> "{" <field_initialization>* "}"
+
+<enum_initialization> ::= <generic_identifier> "::" <identifer> <enum_inner_type_init>?
+<enum_inner_type_init> ::= "(" <expression> ")"
+
+<field_initialization> ::= <identifier> ":" <expression> ","
+
+// reference
+obj
+Obj
+obj.func
+obj.field.func
+Obj::func
+Mod::Obj::func
+
+// function calls
+func(a)
+obj.func()
+obj.func(a)
+obj.func(a, b)
+obj.field.func(a)
+Obj::func(a, b)
+Mod::Obj::func(a, b)
+
+// object initialization
+Obj "{" <fields> "}" ";" 
+Obj::NestedObj "{" <fields> "}" ";"
+

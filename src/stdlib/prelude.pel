@@ -1,0 +1,20 @@
+object String {
+  fields {
+  }
+}
+
+object Integer {
+
+}
+
+object Float {
+
+}
+
+object Boolean {
+
+}
+
+object Char {
+
+}

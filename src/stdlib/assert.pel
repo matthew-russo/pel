@@ -1,0 +1,20 @@
+func assert<T>(input: T) -> AssertionValue {
+  return AssertionValue {
+    input: input,
+  };
+}
+
+object AssertionValue<T> {
+  fields {
+    input: T,
+  }
+
+  methods {
+    func is(self, T: other) {
+      if self.input != other {
+        let msg: String := String.format("assertion failed: %s is not equal to %s", self.input, other);
+        panic(msg);
+      }
+    }
+  }
+}

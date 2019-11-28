@@ -1,0 +1,55 @@
+type UserName := String;
+
+object UniqueId {
+  fields {
+    id: String,
+  }
+
+  functions {
+    func generate() -> Self {
+      return Self { id: "this_is_a_bad_id", };
+    }
+  }
+}
+
+object Account {
+  fields {
+    id: UniqueId,
+    balance: Integer,
+  }
+
+  methods {
+    public func withdraw(self, amt: PositiveNumber) -> UnitErrorResult {
+      let self.balance := self.balance - amt;
+    }
+
+    public func deposit(self, amt: PositiveNumber) {
+      let self.balance := self.balance + amt;
+    }
+  }
+}
+
+object Transfer {
+  fields {
+    src: Account,
+    dst: Account,
+  }
+
+  methods {
+    public func transfer(self, amt: PositiveNumber) -> UnitErrorResult {
+      return src
+        .withdraw(amt)
+        .map(|amt: PositiveNumber| { dst.deposit(amt); } );
+    }
+  }
+}
+
+func main() -> UnitErrorResult {
+  let acctA := Account { id: UniqueId::generate(), balance: 10, };
+  let acctB := Account { id: UniqueId::generate(), balance: 0, };
+
+  Transfer { src: acctA, dst: acctB, }.transfer(7);
+
+  assert(3, acctA.getBalance());
+  assert(7, acctB.getBalance());
+}

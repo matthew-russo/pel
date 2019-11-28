@@ -1,0 +1,18 @@
+
+object File {
+  fields {
+
+  }
+
+  functions {
+    func open(path: String) -> Self {
+
+    }
+  }
+
+  methods {
+    func write(self, toWrite: String) -> Result {
+
+    }
+  }
+}

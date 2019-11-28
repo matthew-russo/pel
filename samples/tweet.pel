@@ -1,0 +1,55 @@
+// maybe make id an implicit thing? how would that work?
+
+contract Likable {
+  liked_by(liker: UniqueId)
+}
+
+implicit contract CanLike {
+  like(to_like: Likable) {
+    to_like.liked_by(self._id)
+  }
+}
+
+
+object Tweet enforces Likeable {
+  fields {
+    id: UniqueId,
+    parent_id: Maybe<UniqueId>,
+    posted_by: UniqueId,
+    posted_at: DateTime,
+    message: String,
+  }
+
+  methods {
+    like(liker: UniqueId) {
+
+    }
+  }
+
+  functions {
+    new(message: String, by: UniqueId, parent: Maybe<UniqueId>) Tweet {
+      Tweet {
+        id: UniqueId::generate(),
+        parent_id: parent,
+        posted_by: by,
+        posted_at: DateTime::now(),
+        message: String,
+      }
+    }
+  }
+}
+
+object User {
+  fields {
+    id: UniqueId,
+    name: String,
+  }
+
+  methods {
+
+  }
+
+  functions {
+
+  }
+}

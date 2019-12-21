@@ -1,4 +1,4 @@
-use crate::syntax::syntax::*;
+use crate::syntax::parse_tree::*;
 use super::prelude;
 
 use std::collections::HashMap;
@@ -116,6 +116,19 @@ impl Symbol {
     // get_size(&mut self) -> u64;
     // get_type(&mut self) -> Type;
     // defined_at(&mut self) -> Span;
+    pub fn is_type_variable(&self) -> bool {
+        match self {
+            Symbol::TypeVariable(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_unbound_type_variable(&self) -> bool {
+        match self {
+            Symbol::TypeVariable(Some(_)) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -126,7 +139,6 @@ pub(crate) enum ValueType {
     CharType,
     BooleanType,
 }
-
 
 #[derive(Clone, Debug)]
 pub(crate) struct Object {
@@ -192,6 +204,9 @@ pub(crate) trait Callable<E: Evaluator> {
     fn call(&self, evaluator: &mut E, args: &Vec<Expression>) -> Option<SymbolId>;
 }
 
+// Some of these are just structural / control flow
+// and some of them are actually content
+// there is probably a better abstraction for this
 pub(crate) trait Evaluator {
     fn visit_program(&mut self, program: &Program);
     fn visit_declaration(&mut self, declaration: &Declaration);
@@ -199,11 +214,7 @@ pub(crate) trait Evaluator {
     fn visit_object_declaration(&mut self, obj_decl: &ObjectDeclaration);
     fn visit_contract_declaration(&mut self, contract_decl: &ContractDeclaration);
     fn visit_implementation_declaration(&mut self, impl_decl: &ImplementationDeclaration);
-    fn visit_variants(&mut self, variants: &Variants);
     fn visit_variant_declaration(&mut self, variant_decl: &VariantDeclaration);
-    fn visit_fields(&mut self, fields: &Fields);
-    fn visit_methods(&mut self, methods: &Methods);
-    fn visit_functions(&mut self, functions: &Functions);
     fn visit_function_declaration(&mut self, function_decl: &FunctionDeclaration);
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &TypedVariableDeclaration);
     fn visit_block_body(&mut self, block_body: &BlockBody);

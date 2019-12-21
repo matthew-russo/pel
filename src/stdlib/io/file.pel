@@ -1,7 +1,9 @@
+module IO;
 
 object File {
   fields {
-
+    fd: Int,
+    absolute_path: String,
   }
 
   functions {
@@ -11,7 +13,7 @@ object File {
   }
 
   methods {
-    func write(self, toWrite: String) -> Result {
+    func write(self, to_write: String) -> Result {
 
     }
   }

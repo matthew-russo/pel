@@ -9,6 +9,11 @@ pub(super) fn prelude(symbol_table: &mut SymbolTable) -> HashMap<String, SymbolI
     let string_symbol_id = symbol_table.new_symbol(string_object);
     env.insert("String".into(), string_symbol_id);
 
+    let integer_object = Symbol::Object(integer_object());
+    let integer_symbol_id = symbol_table.new_symbol(integer_object);
+    env.insert("Int".into(), integer_symbol_id);
+
+
     let print_symbol_id = symbol_table.new_symbol(Symbol::NativeFunction(NativeFunction::Print));
     env.insert("print".into(), print_symbol_id);
 
@@ -33,10 +38,24 @@ fn string_object() -> Object {
     }
 }
 
-// pub fn integer_object() -> Object {
-// 
-// }
-// 
+fn integer_object() -> Object {
+    let type_arguments = Vec::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("internal".into(), SymbolTable::INT_TYPE_SYMBOL_ID);
+
+    let functions = Vec::new();
+
+    let methods = Vec::new();
+
+    Object {
+        type_arguments,
+        fields,
+        functions,
+        methods,
+    }
+}
+
 // pub fn float_object() -> Object {
 // 
 // }

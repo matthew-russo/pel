@@ -1,0 +1,55 @@
+module Collections;
+
+object Vec<<T>> {
+  fields {
+    internal: [T],
+    len: Int,
+    capacity: Int,
+  }
+
+  functions {
+    
+  }
+
+  methods {
+    public len(self) -> Int {
+      return self.len;
+    }
+
+    public get(self, i: Int) -> T {
+      // TODO -> check bounds or use dep types?
+      return internal[i];
+    }
+
+    public set(self, i: Int, t: T) -> T {
+      // TODO -> check bounds or use dep types?
+      let temp = self.internal[i];
+      self.internals[i] = t;
+      return temp;
+    }
+
+    public add(self, t: T) {
+      if self.len == self.capacity {
+        self.double_capacity();
+      }
+
+      self.len = self.len + 1;
+      self.internal[self.len] = t;
+    }
+
+    private double_capacity(self) {
+      let new_internal = Array<<T>>::new(capacity * 2);
+      Array.copy(self.internal, new_internal);
+      self.internal = new_internal;
+      self.capacity = self.capacity * 2;
+    }
+  }
+}
+
+implement Iterator<<T>> for Vec<<T>> {
+
+}
+
+implement Functor<<A> for Vec<<A>> {
+
+}

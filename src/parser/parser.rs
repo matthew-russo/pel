@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fmt::Display;
 
 use crate::lexer::tokens::*;
-use crate::syntax::syntax::*;
+use crate::syntax::parse_tree::*;
 use crate::utils::utils;
 
 #[derive(Debug, Clone)]
@@ -225,12 +225,12 @@ impl Parser {
 
         let methods = match self.current_token() {
             Token::Methods => self.methods()?,
-            _ => Methods { methods: Vec::new() },
+            _ => Vec::new(),
         };
 
         let functions = match self.tokens[self.current] {
             Token::Functions => self.functions()?,
-            _ => Functions { functions: Vec::new() },
+            _ => Vec::new(),
         };
 
         self.expect(Token::CloseCurlyBracket, "enum_declaration")?;
@@ -262,12 +262,12 @@ impl Parser {
         
         let methods = match self.tokens[self.current] {
             Token::Methods => self.methods()?,
-            _ => Methods { methods: Vec::new() },
+            _ => Vec::new(),
         };
 
         let functions = match self.tokens[self.current] {
             Token::Functions => self.functions()?,
-            _ => Functions { functions: Vec::new() },
+            _ => Vec::new(),
         };
         
         self.expect(Token::CloseCurlyBracket, "object_declaration")?;
@@ -472,7 +472,7 @@ impl Parser {
         })
     }
 
-    fn variants(&mut self) -> Result<Variants, ParseError> {
+    fn variants(&mut self) -> Result<Vec<VariantDeclaration>, ParseError> {
         self.expect(Token::Variants, "variants")?;
         self.expect(Token::OpenCurlyBracket, "variants")?;
         
@@ -487,9 +487,7 @@ impl Parser {
         
         self.expect(Token::CloseCurlyBracket, "variants")?;
 
-        Ok(Variants {
-            variants
-        })
+        Ok(variants)
     }
 
     fn variant_declaration(&mut self) -> Result<VariantDeclaration, ParseError> {
@@ -515,7 +513,7 @@ impl Parser {
         })
     }
 
-    fn fields(&mut self) -> Result<Fields, ParseError> {
+    fn fields(&mut self) -> Result<Vec<TypedVariableDeclaration>, ParseError> {
         self.expect(Token::Fields, "fields")?;
         self.expect(Token::OpenCurlyBracket, "fields")?;
         
@@ -532,12 +530,10 @@ impl Parser {
 
         self.expect(Token::CloseCurlyBracket, "fields")?;
 
-        Ok(Fields {
-            fields,
-        })
+        Ok(fields)
     }
 
-    fn methods(&mut self) -> Result<Methods, ParseError> {
+    fn methods(&mut self) -> Result<Vec<FunctionDeclaration>, ParseError> {
         self.expect(Token::Methods, "methods")?;
         self.expect(Token::OpenCurlyBracket, "methods")?;
         
@@ -552,12 +548,10 @@ impl Parser {
     
         self.expect(Token::CloseCurlyBracket, "methods")?;
 
-        Ok(Methods {
-            methods,
-        })
+        Ok(methods)
     }
 
-    fn functions(&mut self) -> Result<Functions, ParseError> {
+    fn functions(&mut self) -> Result<Vec<FunctionDeclaration>, ParseError> {
         self.expect(Token::Functions, "functions")?;
         self.expect(Token::OpenCurlyBracket, "functions")?;
         
@@ -572,9 +566,7 @@ impl Parser {
     
         self.expect(Token::CloseCurlyBracket, "functions")?;
 
-        Ok(Functions {
-            functions,
-        })
+        Ok(functions)
     }
 
     fn block_body(&mut self) -> Result<BlockBody, ParseError> {

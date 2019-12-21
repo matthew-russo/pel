@@ -1,5 +1,3 @@
-#![feature(const_string_new)]
-
 use clap::{Arg, App};
 
 mod lexer;
@@ -16,12 +14,12 @@ use parser::parser::Parser;
 use evaluator::interpreter::Interpreter;
 use evaluator::evaluator::Evaluator;
 
-use syntax::syntax::{ChainableExpression, ExpressionChain, ExpressionStart, FunctionApplication, Variable};
+use syntax::parse_tree::{ChainableExpression, ExpressionChain, ExpressionStart, FunctionApplication, Variable};
 
 fn main() {
     let src_file_arg_name = "src_file";
 
-    let app = App::new("My Super Program")
+    let app = App::new("pel")
         .version("0.1")
         .author("Matthew Russo <matthew@matthewclayrusso.com>")
         .about("Compiler and Interpreter for the PEL language")

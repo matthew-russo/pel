@@ -18,18 +18,18 @@ pub(crate) enum Declaration {
 pub(crate) struct EnumDeclaration {
     pub type_name: String,
     pub type_params: Vec<String>,
-    pub variants: Variants,
-    pub methods: Methods,
-    pub functions: Functions,
+    pub variants: Vec<VariantDeclaration>,
+    pub methods: Vec<FunctionDeclaration>,
+    pub functions: Vec<FunctionDeclaration>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ObjectDeclaration {
     pub type_name: String,
     pub type_params: Vec<String>,
-    pub fields: Fields,
-    pub methods: Methods,
-    pub functions: Functions,
+    pub fields: Vec<TypedVariableDeclaration>,
+    pub methods: Vec<FunctionDeclaration>,
+    pub functions: Vec<FunctionDeclaration>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,30 +47,9 @@ pub(crate) struct ImplementationDeclaration {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Variants {
-    pub variants: Vec<VariantDeclaration>,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct VariantDeclaration {
     pub name: String,
     pub contains: Option<Expression>,
-}
-
-// TODO -> get rid of this or make it better so we don't access it with `ObjDecl.fields.fields`
-#[derive(Debug, Clone)]
-pub(crate) struct Fields {
-    pub fields: Vec<TypedVariableDeclaration>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Methods {
-    pub methods: Vec<FunctionDeclaration>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Functions {
-    pub functions: Vec<FunctionDeclaration>,
 }
 
 #[derive(Debug, Clone)]

@@ -1,0 +1,38 @@
+module Containers;
+
+enum Result<L, R> {
+  variants {
+    Ok(L),
+    Err(R),
+  }
+
+  functions {
+
+  }
+
+  methods {
+    public is_ok(self) -> bool {
+      match self {
+        Ok(_) => true,
+        _ => false,
+      }
+    }
+
+    public is_err(self) -> bool {
+      match self {
+        Err(_) => true,
+        _ => false,
+      }
+    }
+  }
+}
+
+
+implement Functor<A> for Result<A, E> {
+  map<B>(self, fn: func(A) -> B) -> Result<B, E> {
+    match self {
+      Ok(a) => Ok(fn(a)),
+      Err(e) => Err(e),
+    }
+  }
+}

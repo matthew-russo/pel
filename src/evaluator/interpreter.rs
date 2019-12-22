@@ -1,6 +1,6 @@
 use crate::evaluator::evaluator::{
     Callable, Enum, Environment, Evaluator, Function, NativeFunction, Object, ObjectInstance,
-    Symbol, SymbolId, SymbolTable,
+    Symbol, SymbolId, SymbolTable, FunctionParent, Module,
 };
 use crate::syntax::parse_tree::*;
 
@@ -30,6 +30,10 @@ use std::sync::{Arc, RwLock};
 // +------+---------------+---------------+
 // | Name | AddressOfBody | EnvironmentId |
 // +------+---------------+---------------+
+
+lazy_static! {
+    static ref main_module: Arc<RwLock<Module>> = Arc::new(RwLock::new(Module { parent: None, name: "main".into(), } ));
+}
 
 pub(crate) struct Interpreter {
     symbol_table: SymbolTable,
@@ -157,24 +161,19 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let functions = obj_decl
-            .functions
-            .iter()
-            .map(|fd| Function::from_function_decl_syntax(fd, &self.global_env))
-            .collect();
-
-        let methods = obj_decl
-            .methods
-            .iter()
-            .map(|fd| Function::from_function_decl_syntax(fd, &self.global_env))
-            .collect();
-
-        let obj = Object {
+        let mut obj = Arc::new(RwLock::new(Object {
+            module: Arc::clone(&main_module),
+            name: obj_decl.type_name.clone(),
             type_arguments,
             fields,
-            functions,
-            methods,
-        };
+            methods: Vec::new(),
+        }));
+
+        obj.write().unwrap().methods = obj_decl
+            .methods
+            .iter()
+            .map(|fd| Function::from_function_decl_syntax(FunctionParent::Object(Arc::clone(&obj)), fd, &self.global_env))
+            .collect();
 
         let obj_sym = Symbol::Object(obj);
 
@@ -220,7 +219,10 @@ impl Evaluator for Interpreter {
             return;
         }
 
+        // TODO -> remove this and pass context in
+        let parent = FunctionParent::Module(Arc::clone(&main_module));
         let func_sym = Symbol::Function(Function::from_function_decl_syntax(
+            parent,
             func_decl,
             &self.current_env,
         ));
@@ -273,8 +275,13 @@ impl Evaluator for Interpreter {
                 self.visit_expression(&var_assignment.value);
                 let value_sym_id = self.last_local.take().unwrap();
 
-                // TODO -> type check target_type and target
-                // TODO -> type check target_type and value
+                let value = self.symbol_table.load_symbol(value_sym_id);
+                let value_type_sym_id = value.read().unwrap().get_type();
+                if value_type_sym_id != target_type_sym_id {
+                    let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
+                    let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
+                    panic!("expected a value of type: {:?}, but got {:?}", target_type_sym.read().unwrap(), value_type_sym.read().unwrap());
+                }
 
                 self.symbol_table.reassign_id(target_sym_id, value_sym_id);
             }
@@ -399,16 +406,17 @@ impl Evaluator for Interpreter {
         };
 
         // ensure that number of fields match
-        if obj_decl.fields.len() != obj_init.fields.len() {
+        if obj_decl.read().unwrap().fields.len() != obj_init.fields.len() {
             let msg = format!(
                 "expected {} fields in object initialization but got {}",
-                obj_decl.fields.len(),
+                obj_decl.read().unwrap().fields.len(),
                 obj_init.fields.len()
             );
             panic!(msg);
         }
 
-        for (key, _val) in obj_decl.fields.iter() {
+        for (key, _val) in obj_decl.read().unwrap().fields.iter() {
+            println!("visiting initialization of {}, with val: {}", key, _val);
             // ensure names of fields match
             if !obj_init.fields.contains_key(key) {
                 let msg = format!(
@@ -433,7 +441,10 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let initialized_object = ObjectInstance { field_values };
+        let initialized_object = ObjectInstance {
+            ty: last_local_sym_id,
+            field_values,
+        };
 
         let sym_id = self
             .symbol_table
@@ -472,8 +483,8 @@ impl Evaluator for Interpreter {
         // TODO -> check num type params versus num type args
         match to_apply_to.read().unwrap().deref() {
             Symbol::Object(o) => {
-                if o.type_arguments.len() != type_app.args.len() {
-                    let message = format!("invalid number of type parameters in type application. expected {}, got {}", o.type_arguments.len(), type_app.args.len());
+                if o.read().unwrap().type_arguments.len() != type_app.args.len() {
+                    let message = format!("invalid number of type parameters in type application. expected {}, got {}", o.read().unwrap().type_arguments.len(), type_app.args.len());
                     panic!(message);
                 }
             }
@@ -505,7 +516,8 @@ impl Evaluator for Interpreter {
 
         match new_type {
             Symbol::Object(ref mut o) => {
-                o.type_arguments = o
+                let mut writable_o = o.write().unwrap();
+                writable_o.type_arguments = writable_o
                     .type_arguments
                     .drain(..)
                     .zip(types.into_iter())

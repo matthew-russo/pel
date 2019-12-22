@@ -13,26 +13,30 @@ pub(crate) struct SymbolTable {
 }
 
 impl SymbolTable {
+    pub const UNDEFINED_SYMBOL_ID: SymbolId  = std::u32::MAX;
     pub const EMPTY_TYPE_VARIABLE_ID: SymbolId = 0;
     pub const BOOL_TYPE_SYMBOL_ID: SymbolId    = 1;
     pub const INT_TYPE_SYMBOL_ID: SymbolId     = 2;
     pub const FLOAT_TYPE_SYMBOL_ID: SymbolId   = 3;
     pub const CHAR_TYPE_SYMBOL_ID: SymbolId    = 4;
     pub const STRING_TYPE_SYMBOL_ID: SymbolId  = 5;
+    pub const OBJECT_TYPE_SYMBOL_ID: SymbolId  = 6;
+    pub const ENUM_TYPE_SYMBOL_ID: SymbolId    = 7;
+    pub const VALUE_TYPE_SYMBOL_ID: SymbolId   = 8;
 
     pub fn new() -> Self {
         let mut symbols = HashMap::new();
 
         symbols.insert(Self::EMPTY_TYPE_VARIABLE_ID, Arc::new(RwLock::new(Symbol::TypeVariable(None))));
         symbols.insert(Self::BOOL_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::BooleanType))));
-        symbols.insert(Self::BOOL_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::BooleanType))));
         symbols.insert(Self::INT_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::IntegerType))));
         symbols.insert(Self::FLOAT_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::FloatType))));
         symbols.insert(Self::CHAR_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::CharType))));
         symbols.insert(Self::STRING_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::StringType))));
 
+
         Self {
-            next_id: 6,
+            next_id: 9,
             symbols,
         }
     }
@@ -99,9 +103,15 @@ impl Environment {
     }
 }
 
+pub trait SymHash {
+    fn sym_hash(&self) -> String;
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum Symbol {
-    Object(Object),
+    Module(Module),
+    Contract(Contract),
+    Object(Arc<RwLock<Object>>),
     ObjectInstance(ObjectInstance),
     Enum(Enum),
     EnumInstance(EnumInstance),
@@ -112,10 +122,58 @@ pub(crate) enum Symbol {
     TypeVariable(Option<Box<Symbol>>),
 }
 
+// i need a way for Option<<Int>> here
+// and Option<<Int>> here to both result
+// in the same type id. this gets more
+// complicated when modules are involved
+// to do this we need the fully qualified module/object
+// path and the same for all of its type arguments
+
 impl Symbol {
     // get_size(&mut self) -> u64;
     // get_type(&mut self) -> Type;
     // defined_at(&mut self) -> Span;
+
+    pub fn get_type(&self) -> SymbolId {
+        match self {
+            Symbol::Object(_) => {
+                SymbolTable::OBJECT_TYPE_SYMBOL_ID
+            },
+            Symbol::ObjectInstance(oi) => {
+                oi.ty.clone()
+            },
+            Symbol::Enum(_) => {
+                SymbolTable::ENUM_TYPE_SYMBOL_ID
+            },
+            Symbol::EnumInstance(ei) => {
+                ei.ty.clone()
+            },
+            Symbol::Function(_) => {
+                SymbolTable::UNDEFINED_SYMBOL_ID
+            },
+            Symbol::NativeFunction(_) => {
+                SymbolTable::UNDEFINED_SYMBOL_ID
+            },
+            Symbol::ValueType(_) => {
+                SymbolTable::VALUE_TYPE_SYMBOL_ID
+                
+            },
+            Symbol::Value(v) => {
+                match v {
+                    Value::StringValue(_) => SymbolTable::STRING_TYPE_SYMBOL_ID,
+                    Value::IntegerValue(_) => SymbolTable::INT_TYPE_SYMBOL_ID,
+                    Value::FloatValue(_) => SymbolTable::FLOAT_TYPE_SYMBOL_ID,
+                    Value::CharValue(_) => SymbolTable::CHAR_TYPE_SYMBOL_ID,
+                    Value::BooleanValue(_) => SymbolTable::BOOL_TYPE_SYMBOL_ID,
+                }
+            },
+            Symbol::TypeVariable(_) => {
+                SymbolTable::UNDEFINED_SYMBOL_ID
+            }
+            _ => unimplemented!(),
+        }
+    }
+
     pub fn is_type_variable(&self) -> bool {
         match self {
             Symbol::TypeVariable(_) => true,
@@ -131,45 +189,122 @@ impl Symbol {
     }
 }
 
+impl SymHash for Symbol {
+    fn sym_hash(&self) -> String {
+        match self {
+            Symbol::Module(m) => {
+                m.sym_hash()
+            },
+            Symbol::Contract(c) => {
+                c.sym_hash()
+                // the concatenation of all parent modules and then the contarct name
+            },
+            Symbol::Object(o) => {
+                o.read().unwrap().sym_hash()
+                // the concatenation of all parent modules and then the object name
+            },
+            Symbol::Enum(e) => {
+                e.sym_hash()
+                // the concatenation of all parent modules and then the enum name
+            },
+            Symbol::Function(f) => {
+                f.sym_hash()
+                // the concatenation of all parent modules and then the enum name
+            },
+            s => {
+                panic!("taking the sym hash of {:?} is not valid", s);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
-pub(crate) enum ValueType {
-    StringType,
-    IntegerType,
-    FloatType,
-    CharType,
-    BooleanType,
+pub(crate) struct Module {
+    pub parent: Option<Arc<RwLock<Module>>>,
+    pub name: String,
+}
+
+impl SymHash for Module {
+    fn sym_hash(&self) -> String {
+        let mut hash = String::new();
+        if let Some(ref p) = self.parent {
+            hash = p.read().unwrap().sym_hash();
+        }
+
+        [hash, self.name.clone()].join("::")
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Contract {
+    pub module: Arc<RwLock<Module>>,
+    pub name: String,
+    pub type_arguments: Vec<(String, SymbolId)>,
+    pub required_functions: Vec<FunctionSignature>,
+}
+
+impl SymHash for Contract {
+    fn sym_hash(&self) -> String {
+        let hash = self.module.read().unwrap().sym_hash();
+        [hash, self.name.clone()].join("::")
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Object {
+    pub module: Arc<RwLock<Module>>,
+    pub name: String,
     pub type_arguments: Vec<(String, SymbolId)>,
     pub fields: HashMap<String, SymbolId>,
-    pub functions: Vec<Function>,
     pub methods: Vec<Function>,
+}
+
+impl SymHash for Object {
+    fn sym_hash(&self) -> String {
+        let hash = self.module.read().unwrap().sym_hash();
+        [hash, self.name.clone()].join("::")
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ObjectInstance {
-    // TODO -> need some type of referece back to the original object / type so we can call
-    // functions on it.
+    pub ty: SymbolId,
     pub field_values: HashMap<String, SymbolId>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Enum {
+    pub module: Arc<RwLock<Module>>,
+    pub name: String,
     pub type_arguments: Vec<(String, SymbolId)>,
     pub variants: HashMap<String, SymbolId>,
-    pub functions: Vec<Function>,
     pub methods: Vec<Function>,
+}
+
+impl SymHash for Enum {
+    fn sym_hash(&self) -> String {
+        let hash = self.module.read().unwrap().sym_hash();
+        [hash, self.name.clone()].join("::")
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct EnumInstance {
+    pub ty: SymbolId,
     pub variant: (String, Box<SymbolId>),
 }
 
 #[derive(Clone, Debug)]
+pub(crate) enum FunctionParent {
+    Module(Arc<RwLock<Module>>),
+    Object(Arc<RwLock<Object>>),
+    Enum(Arc<RwLock<Enum>>),
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct Function {
+    pub parent: FunctionParent,
+    pub name: String,
     pub type_parameters: Vec<(String, SymbolId)>,
     pub parameters: Vec<FunctionParameter>,
     pub returns: Option<Expression>,
@@ -179,13 +314,15 @@ pub(crate) struct Function {
 
 impl Function {
     // TODO -> eerily similar to Interpreter::visit_object_declaration
-    pub fn from_function_decl_syntax(func_decl: &FunctionDeclaration, current_env: &Arc<RwLock<Environment>>) -> Self {
+    pub fn from_function_decl_syntax(parent: FunctionParent, func_decl: &FunctionDeclaration, current_env: &Arc<RwLock<Environment>>) -> Self {
         let type_params = func_decl.signature.type_params
             .iter()
             .map(|t| (t.clone(), SymbolTable::EMPTY_TYPE_VARIABLE_ID))
             .collect();
 
         Self {
+            parent,
+            name: func_decl.signature.name.clone(),
             type_parameters: type_params,
             parameters: func_decl.signature.params.clone(),
             returns: func_decl.signature.returns.clone(),
@@ -195,9 +332,30 @@ impl Function {
     }
 }
 
+impl SymHash for Function {
+    fn sym_hash(&self) -> String {
+        let hash = match self.parent {
+            FunctionParent::Module(ref m) => m.read().unwrap().sym_hash(),
+            FunctionParent::Object(ref o) => o.read().unwrap().sym_hash(),
+            FunctionParent::Enum(ref e)   => e.read().unwrap().sym_hash(),
+        };
+
+        [hash, self.name.clone()].join("::")
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum NativeFunction {
     Print,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ValueType {
+    StringType,
+    IntegerType,
+    FloatType,
+    CharType,
+    BooleanType,
 }
 
 pub(crate) trait Callable<E: Evaluator> {

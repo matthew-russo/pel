@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::{Arc, RwLock};
+
 use crate::evaluator::evaluator::{
     Callable, Enum, Environment, Evaluator, Function, NativeFunction, Object, ObjectInstance,
-    Symbol, SymbolId, SymbolTable, FunctionParent, Module,
+    Symbol, SymbolId, SymbolTable, Module, SymHash
 };
 use crate::syntax::parse_tree::*;
 
-use std::ops::Deref;
-use std::sync::{Arc, RwLock};
 
 //        -- environment --            ----- state -----
 //      /                   \        /                   \
@@ -30,10 +32,6 @@ use std::sync::{Arc, RwLock};
 // +------+---------------+---------------+
 // | Name | AddressOfBody | EnvironmentId |
 // +------+---------------+---------------+
-
-lazy_static! {
-    static ref main_module: Arc<RwLock<Module>> = Arc::new(RwLock::new(Module { parent: None, name: "main".into(), } ));
-}
 
 pub(crate) struct Interpreter {
     symbol_table: SymbolTable,
@@ -161,18 +159,20 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let mut obj = Arc::new(RwLock::new(Object {
-            module: Arc::clone(&main_module),
+        let mut obj = Object {
+            parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
             name: obj_decl.type_name.clone(),
             type_arguments,
             fields,
             methods: Vec::new(),
-        }));
+        };
 
-        obj.write().unwrap().methods = obj_decl
+        let sym_id = self.symbol_table.gen_id();
+
+        obj.methods = obj_decl
             .methods
             .iter()
-            .map(|fd| Function::from_function_decl_syntax(FunctionParent::Object(Arc::clone(&obj)), fd, &self.global_env))
+            .map(|fd| Function::from_function_decl_syntax(sym_id.clone(), fd, &self.global_env))
             .collect();
 
         let obj_sym = Symbol::Object(obj);
@@ -180,11 +180,11 @@ impl Evaluator for Interpreter {
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
         self.current_env = parent_env;
 
-        let symbol_id = self.symbol_table.new_symbol(obj_sym);
+        self.symbol_table.new_symbol_with_id(obj_sym, sym_id);
         self.current_env
             .write()
             .unwrap()
-            .define(obj_decl.type_name.clone(), symbol_id);
+            .define(obj_decl.type_name.clone(), sym_id);
     }
 
     fn visit_contract_declaration(&mut self, contract_decl: &ContractDeclaration) {
@@ -219,10 +219,9 @@ impl Evaluator for Interpreter {
             return;
         }
 
-        // TODO -> remove this and pass context in
-        let parent = FunctionParent::Module(Arc::clone(&main_module));
         let func_sym = Symbol::Function(Function::from_function_decl_syntax(
-            parent,
+            // TODO -> remove this and pass module context in
+            SymbolTable::MAIN_MODULE_SYMBOL_ID,
             func_decl,
             &self.current_env,
         ));
@@ -277,10 +276,13 @@ impl Evaluator for Interpreter {
 
                 let value = self.symbol_table.load_symbol(value_sym_id);
                 let value_type_sym_id = value.read().unwrap().get_type();
+
                 if value_type_sym_id != target_type_sym_id {
                     let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
                     let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
-                    panic!("expected a value of type: {:?}, but got {:?}", target_type_sym.read().unwrap(), value_type_sym.read().unwrap());
+                    panic!("expected a value of type: {}, but got {}",
+                           target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                           value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
                 }
 
                 self.symbol_table.reassign_id(target_sym_id, value_sym_id);
@@ -406,17 +408,16 @@ impl Evaluator for Interpreter {
         };
 
         // ensure that number of fields match
-        if obj_decl.read().unwrap().fields.len() != obj_init.fields.len() {
+        if obj_decl.fields.len() != obj_init.fields.len() {
             let msg = format!(
                 "expected {} fields in object initialization but got {}",
-                obj_decl.read().unwrap().fields.len(),
+                obj_decl.fields.len(),
                 obj_init.fields.len()
             );
             panic!(msg);
         }
 
-        for (key, _val) in obj_decl.read().unwrap().fields.iter() {
-            println!("visiting initialization of {}, with val: {}", key, _val);
+        for (key, _val) in obj_decl.fields.iter() {
             // ensure names of fields match
             if !obj_init.fields.contains_key(key) {
                 let msg = format!(
@@ -483,8 +484,8 @@ impl Evaluator for Interpreter {
         // TODO -> check num type params versus num type args
         match to_apply_to.read().unwrap().deref() {
             Symbol::Object(o) => {
-                if o.read().unwrap().type_arguments.len() != type_app.args.len() {
-                    let message = format!("invalid number of type parameters in type application. expected {}, got {}", o.read().unwrap().type_arguments.len(), type_app.args.len());
+                if o.type_arguments.len() != type_app.args.len() {
+                    let message = format!("invalid number of type parameters in type application. expected {}, got {}", o.type_arguments.len(), type_app.args.len());
                     panic!(message);
                 }
             }
@@ -512,12 +513,11 @@ impl Evaluator for Interpreter {
 
         // NOTE: This is purposefully actually cloning the underlying type as we are creating
         // a new with one applied types
-        let mut new_type = to_apply_to.read().unwrap().deref().clone();
+        let mut new_type = Symbol::clone(to_apply_to.read().unwrap().deref());
 
         match new_type {
             Symbol::Object(ref mut o) => {
-                let mut writable_o = o.write().unwrap();
-                writable_o.type_arguments = writable_o
+                o.type_arguments = o
                     .type_arguments
                     .drain(..)
                     .zip(types.into_iter())
@@ -538,7 +538,8 @@ impl Evaluator for Interpreter {
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         }
 
-        let sym_id = self.symbol_table.new_symbol(new_type);
+        // we need to check if the equivalent type already exists
+        let sym_id = self.symbol_table.get_or_create_symbol(new_type);
         self.last_local = Some(sym_id);
     }
 

@@ -2,6 +2,7 @@ use crate::syntax::parse_tree::*;
 use super::prelude;
 
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 pub(crate) type SymbolId = u32;
@@ -9,6 +10,7 @@ pub(crate) type SymbolId = u32;
 #[derive(Debug)]
 pub(crate) struct SymbolTable {
     next_id: SymbolId,
+    sym_hash_to_sym_id: HashMap<String, SymbolId>,
     symbols: HashMap<SymbolId, Arc<RwLock<Symbol>>>,
 }
 
@@ -23,30 +25,61 @@ impl SymbolTable {
     pub const OBJECT_TYPE_SYMBOL_ID: SymbolId  = 6;
     pub const ENUM_TYPE_SYMBOL_ID: SymbolId    = 7;
     pub const VALUE_TYPE_SYMBOL_ID: SymbolId   = 8;
+    pub const MAIN_MODULE_SYMBOL_ID: SymbolId  = 9;
 
     pub fn new() -> Self {
         let mut symbols = HashMap::new();
 
         symbols.insert(Self::EMPTY_TYPE_VARIABLE_ID, Arc::new(RwLock::new(Symbol::TypeVariable(None))));
-        symbols.insert(Self::BOOL_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::BooleanType))));
-        symbols.insert(Self::INT_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::IntegerType))));
-        symbols.insert(Self::FLOAT_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::FloatType))));
-        symbols.insert(Self::CHAR_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::CharType))));
-        symbols.insert(Self::STRING_TYPE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::ValueType(ValueType::StringType))));
-
+        symbols.insert(Self::BOOL_TYPE_SYMBOL_ID,    Arc::new(RwLock::new(Symbol::ValueType(ValueType::BooleanType))));
+        symbols.insert(Self::INT_TYPE_SYMBOL_ID,     Arc::new(RwLock::new(Symbol::ValueType(ValueType::IntegerType))));
+        symbols.insert(Self::FLOAT_TYPE_SYMBOL_ID,   Arc::new(RwLock::new(Symbol::ValueType(ValueType::FloatType))));
+        symbols.insert(Self::CHAR_TYPE_SYMBOL_ID,    Arc::new(RwLock::new(Symbol::ValueType(ValueType::CharType))));
+        symbols.insert(Self::STRING_TYPE_SYMBOL_ID,  Arc::new(RwLock::new(Symbol::ValueType(ValueType::StringType))));
+        symbols.insert(Self::MAIN_MODULE_SYMBOL_ID,  Arc::new(RwLock::new(Symbol::Module(Module { parent: None, name: "main".into(), } ))));
 
         Self {
-            next_id: 9,
+            next_id: 10,
+            sym_hash_to_sym_id: HashMap::new(),
             symbols,
         }
     }
 
     pub fn new_symbol(&mut self, sym: Symbol) -> SymbolId {
-        let id = self.get_id();
+        let id = self.gen_id();
         self.symbols.insert(id, Arc::new(RwLock::new(sym)));
         id
     }
-    
+
+    pub fn new_symbol_with_id(&mut self, sym: Symbol, id: SymbolId) {
+        self.symbols.insert(id, Arc::new(RwLock::new(sym)));
+    }
+
+    pub fn gen_id(&mut self) -> SymbolId {
+        let temp = self.next_id;
+        self.next_id = self.next_id + 1;
+        temp
+    }
+
+    pub fn get_or_create_symbol(&mut self, sym: Symbol) -> SymbolId {
+        if let Some(hash) = sym.sym_hash(self) {
+            match self.sym_hash_to_sym_id.get(&hash) {
+                Some(id) => id.clone(),
+                None => {
+                    let id = self.gen_id();
+                    self.sym_hash_to_sym_id.insert(hash, id);
+                    self.symbols.insert(id, Arc::new(RwLock::new(sym)));
+                    id
+                },
+            }
+        } else {
+            let id = self.gen_id();
+            self.symbols.insert(id, Arc::new(RwLock::new(sym)));
+            id
+
+        }
+    }
+
     pub fn load_symbol(&self, id: SymbolId) -> Arc<RwLock<Symbol>> {
         // TODO -> don't unwrap this and have it return Result<Symbol, Error>
         self.symbols.get(&id).unwrap().clone()
@@ -55,12 +88,6 @@ impl SymbolTable {
     pub fn reassign_id(&mut self, dest_id: SymbolId, value_id: SymbolId) {
         let value = self.load_symbol(value_id);
         self.symbols.insert(dest_id, value);
-    }
-
-    fn get_id(&mut self) -> SymbolId {
-        let temp = self.next_id;
-        self.next_id = self.next_id + 1;
-        temp
     }
 
 }
@@ -103,15 +130,15 @@ impl Environment {
     }
 }
 
-pub trait SymHash {
-    fn sym_hash(&self) -> String;
+pub(crate) trait SymHash {
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String>;
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum Symbol {
     Module(Module),
     Contract(Contract),
-    Object(Arc<RwLock<Object>>),
+    Object(Object),
     ObjectInstance(ObjectInstance),
     Enum(Enum),
     EnumInstance(EnumInstance),
@@ -190,30 +217,28 @@ impl Symbol {
 }
 
 impl SymHash for Symbol {
-    fn sym_hash(&self) -> String {
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
         match self {
             Symbol::Module(m) => {
-                m.sym_hash()
+                m.sym_hash(table)
             },
             Symbol::Contract(c) => {
-                c.sym_hash()
+                c.sym_hash(table)
                 // the concatenation of all parent modules and then the contarct name
             },
             Symbol::Object(o) => {
-                o.read().unwrap().sym_hash()
+                o.sym_hash(table)
                 // the concatenation of all parent modules and then the object name
             },
             Symbol::Enum(e) => {
-                e.sym_hash()
+                e.sym_hash(table)
                 // the concatenation of all parent modules and then the enum name
             },
             Symbol::Function(f) => {
-                f.sym_hash()
+                f.sym_hash(table)
                 // the concatenation of all parent modules and then the enum name
             },
-            s => {
-                panic!("taking the sym hash of {:?} is not valid", s);
-            }
+            _ => None
         }
     }
 }
@@ -225,13 +250,13 @@ pub(crate) struct Module {
 }
 
 impl SymHash for Module {
-    fn sym_hash(&self) -> String {
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
         let mut hash = String::new();
         if let Some(ref p) = self.parent {
-            hash = p.read().unwrap().sym_hash();
+            hash = p.read().unwrap().sym_hash(table).unwrap();
         }
 
-        [hash, self.name.clone()].join("::")
+        Some([hash, self.name.clone()].join("::"))
     }
 }
 
@@ -244,15 +269,28 @@ pub(crate) struct Contract {
 }
 
 impl SymHash for Contract {
-    fn sym_hash(&self) -> String {
-        let hash = self.module.read().unwrap().sym_hash();
-        [hash, self.name.clone()].join("::")
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
+        let hash = self.module.read().unwrap().sym_hash(table).unwrap();
+
+        let to_append = if !self.type_arguments.is_empty() {
+            let type_arg_sym_hash = self.type_arguments
+                .iter()
+                .map(|(_, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
+                .collect::<Vec<String>>()
+                .join(",");
+   
+            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
+        } else {
+            String::new()
+        };
+        
+        Some([hash, self.name.clone(), to_append].join("::"))
     }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Object {
-    pub module: Arc<RwLock<Module>>,
+    pub parent: SymbolId,
     pub name: String,
     pub type_arguments: Vec<(String, SymbolId)>,
     pub fields: HashMap<String, SymbolId>,
@@ -260,9 +298,23 @@ pub(crate) struct Object {
 }
 
 impl SymHash for Object {
-    fn sym_hash(&self) -> String {
-        let hash = self.module.read().unwrap().sym_hash();
-        [hash, self.name.clone()].join("::")
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
+        let parent = table.load_symbol(self.parent);
+        let hash = parent.read().unwrap().sym_hash(table).unwrap();
+
+        let to_append = if !self.type_arguments.is_empty() {
+            let type_arg_sym_hash = self.type_arguments
+                .iter()
+                .map(|(_, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
+                .collect::<Vec<String>>()
+                .join(",");
+   
+            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
+        } else {
+            String::new()
+        };
+        
+        Some([hash, self.name.clone(), to_append].join("::"))
     }
 }
 
@@ -282,9 +334,22 @@ pub(crate) struct Enum {
 }
 
 impl SymHash for Enum {
-    fn sym_hash(&self) -> String {
-        let hash = self.module.read().unwrap().sym_hash();
-        [hash, self.name.clone()].join("::")
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
+        let hash = self.module.read().unwrap().sym_hash(table).unwrap();
+
+        let to_append = if !self.type_arguments.is_empty() {
+            let type_arg_sym_hash = self.type_arguments
+                .iter()
+                .map(|(_, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
+                .collect::<Vec<String>>()
+                .join(",");
+   
+            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
+        } else {
+            String::new()
+        };
+        
+        Some([hash, self.name.clone(), to_append].join("::"))
     }
 }
 
@@ -295,15 +360,8 @@ pub(crate) struct EnumInstance {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum FunctionParent {
-    Module(Arc<RwLock<Module>>),
-    Object(Arc<RwLock<Object>>),
-    Enum(Arc<RwLock<Enum>>),
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct Function {
-    pub parent: FunctionParent,
+    pub parent: SymbolId,
     pub name: String,
     pub type_parameters: Vec<(String, SymbolId)>,
     pub parameters: Vec<FunctionParameter>,
@@ -314,7 +372,7 @@ pub(crate) struct Function {
 
 impl Function {
     // TODO -> eerily similar to Interpreter::visit_object_declaration
-    pub fn from_function_decl_syntax(parent: FunctionParent, func_decl: &FunctionDeclaration, current_env: &Arc<RwLock<Environment>>) -> Self {
+    pub fn from_function_decl_syntax(parent: SymbolId, func_decl: &FunctionDeclaration, current_env: &Arc<RwLock<Environment>>) -> Self {
         let type_params = func_decl.signature.type_params
             .iter()
             .map(|t| (t.clone(), SymbolTable::EMPTY_TYPE_VARIABLE_ID))
@@ -333,14 +391,17 @@ impl Function {
 }
 
 impl SymHash for Function {
-    fn sym_hash(&self) -> String {
-        let hash = match self.parent {
-            FunctionParent::Module(ref m) => m.read().unwrap().sym_hash(),
-            FunctionParent::Object(ref o) => o.read().unwrap().sym_hash(),
-            FunctionParent::Enum(ref e)   => e.read().unwrap().sym_hash(),
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
+        let parent = table.load_symbol(self.parent);
+
+        let hash = match parent.read().unwrap().deref() {
+            Symbol::Module(ref m) => m.sym_hash(table).unwrap(),
+            Symbol::Object(ref o) => o.sym_hash(table).unwrap(),
+            Symbol::Enum(ref e)   => e.sym_hash(table).unwrap(),
+            _ => unreachable!(),
         };
 
-        [hash, self.name.clone()].join("::")
+        Some([hash, self.name.clone()].join("::"))
     }
 }
 

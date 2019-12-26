@@ -15,13 +15,13 @@ pub(crate) struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub const UNDEFINED_SYMBOL_ID: SymbolId  = std::u32::MAX;
-    pub const EMPTY_TYPE_VARIABLE_ID: SymbolId = 0;
-    pub const BOOL_TYPE_SYMBOL_ID: SymbolId    = 1;
+    pub const UNDEFINED_SYMBOL_ID: SymbolId    = std::u32::MAX;
+    pub const EMPTY_TYPE_VARIABLE_SYMBOL_ID: SymbolId = 0;
+    pub const STRING_TYPE_SYMBOL_ID: SymbolId  = 1;
     pub const INT_TYPE_SYMBOL_ID: SymbolId     = 2;
     pub const FLOAT_TYPE_SYMBOL_ID: SymbolId   = 3;
     pub const CHAR_TYPE_SYMBOL_ID: SymbolId    = 4;
-    pub const STRING_TYPE_SYMBOL_ID: SymbolId  = 5;
+    pub const BOOL_TYPE_SYMBOL_ID: SymbolId    = 5;
     pub const OBJECT_TYPE_SYMBOL_ID: SymbolId  = 6;
     pub const ENUM_TYPE_SYMBOL_ID: SymbolId    = 7;
     pub const VALUE_TYPE_SYMBOL_ID: SymbolId   = 8;
@@ -30,13 +30,8 @@ impl SymbolTable {
     pub fn new() -> Self {
         let mut symbols = HashMap::new();
 
-        symbols.insert(Self::EMPTY_TYPE_VARIABLE_ID, Arc::new(RwLock::new(Symbol::TypeVariable(None))));
-        symbols.insert(Self::BOOL_TYPE_SYMBOL_ID,    Arc::new(RwLock::new(Symbol::ValueType(ValueType::BooleanType))));
-        symbols.insert(Self::INT_TYPE_SYMBOL_ID,     Arc::new(RwLock::new(Symbol::ValueType(ValueType::IntegerType))));
-        symbols.insert(Self::FLOAT_TYPE_SYMBOL_ID,   Arc::new(RwLock::new(Symbol::ValueType(ValueType::FloatType))));
-        symbols.insert(Self::CHAR_TYPE_SYMBOL_ID,    Arc::new(RwLock::new(Symbol::ValueType(ValueType::CharType))));
-        symbols.insert(Self::STRING_TYPE_SYMBOL_ID,  Arc::new(RwLock::new(Symbol::ValueType(ValueType::StringType))));
-        symbols.insert(Self::MAIN_MODULE_SYMBOL_ID,  Arc::new(RwLock::new(Symbol::Module(Module { parent: None, name: "main".into(), } ))));
+        symbols.insert(Self::EMPTY_TYPE_VARIABLE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::TypeVariable(None))));
+        symbols.insert(Self::MAIN_MODULE_SYMBOL_ID,         Arc::new(RwLock::new(Symbol::Module(Module { parent: None, name: "main".into(), } ))));
 
         Self {
             next_id: 10,
@@ -146,7 +141,7 @@ pub(crate) enum Symbol {
     NativeFunction(NativeFunction),
     ValueType(ValueType),
     Value(Value),
-    TypeVariable(Option<Box<Symbol>>),
+    TypeVariable(Option<SymbolId>),
 }
 
 // i need a way for Option<<Int>> here
@@ -187,10 +182,10 @@ impl Symbol {
             },
             Symbol::Value(v) => {
                 match v {
-                    Value::StringValue(_) => SymbolTable::STRING_TYPE_SYMBOL_ID,
+                    Value::StringValue(_)  => SymbolTable::STRING_TYPE_SYMBOL_ID,
                     Value::IntegerValue(_) => SymbolTable::INT_TYPE_SYMBOL_ID,
-                    Value::FloatValue(_) => SymbolTable::FLOAT_TYPE_SYMBOL_ID,
-                    Value::CharValue(_) => SymbolTable::CHAR_TYPE_SYMBOL_ID,
+                    Value::FloatValue(_)   => SymbolTable::FLOAT_TYPE_SYMBOL_ID,
+                    Value::CharValue(_)    => SymbolTable::CHAR_TYPE_SYMBOL_ID,
                     Value::BooleanValue(_) => SymbolTable::BOOL_TYPE_SYMBOL_ID,
                 }
             },
@@ -224,19 +219,28 @@ impl SymHash for Symbol {
             },
             Symbol::Contract(c) => {
                 c.sym_hash(table)
-                // the concatenation of all parent modules and then the contarct name
             },
             Symbol::Object(o) => {
                 o.sym_hash(table)
-                // the concatenation of all parent modules and then the object name
             },
             Symbol::Enum(e) => {
                 e.sym_hash(table)
-                // the concatenation of all parent modules and then the enum name
             },
+            Symbol::ValueType(vt) => {
+                vt.sym_hash(table)
+            }
             Symbol::Function(f) => {
                 f.sym_hash(table)
-                // the concatenation of all parent modules and then the enum name
+            },
+            Symbol::TypeVariable(maybe_tv_id) => {
+                match maybe_tv_id {
+                    Some(tv_id) => {
+                        let tv_sym = table.load_symbol(*tv_id);
+                        let readable_tv_sym = tv_sym.read().unwrap();
+                        readable_tv_sym.sym_hash(table)
+                    },
+                    None => panic!("trying to take sym hash for TypeVariable Hole. is this valid??"),
+                }
             },
             _ => None
         }
@@ -305,7 +309,16 @@ impl SymHash for Object {
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_sym_hash = self.type_arguments
                 .iter()
-                .map(|(_, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
+                .map(|(type_var_name, sym_id)| {
+                    let type_var_sym = table.load_symbol(*sym_id);
+                    let readable_type_var_sym = type_var_sym.read().unwrap();
+                    match readable_type_var_sym.deref() {
+                        Symbol::TypeVariable(Some(tvt)) => {
+                            table.load_symbol(*tvt).read().unwrap().sym_hash(table).unwrap()
+                        },
+                        _ => type_var_name.clone()
+                    }
+                })
                 .collect::<Vec<String>>()
                 .join(",");
    
@@ -340,7 +353,7 @@ impl SymHash for Enum {
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_sym_hash = self.type_arguments
                 .iter()
-                .map(|(_, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
+                .map(|(type_var_name, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
                 .collect::<Vec<String>>()
                 .join(",");
    
@@ -375,7 +388,7 @@ impl Function {
     pub fn from_function_decl_syntax(parent: SymbolId, func_decl: &FunctionDeclaration, current_env: &Arc<RwLock<Environment>>) -> Self {
         let type_params = func_decl.signature.type_params
             .iter()
-            .map(|t| (t.clone(), SymbolTable::EMPTY_TYPE_VARIABLE_ID))
+            .map(|t| (t.clone(), SymbolTable::EMPTY_TYPE_VARIABLE_SYMBOL_ID))
             .collect();
 
         Self {
@@ -412,11 +425,24 @@ pub(crate) enum NativeFunction {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ValueType {
+    BooleanType,
+    CharType,
     StringType,
     IntegerType,
     FloatType,
-    CharType,
-    BooleanType,
+}
+impl SymHash for ValueType {
+    fn sym_hash(&self, _table: &SymbolTable) -> Option<String> {
+        let sh = match self {
+            ValueType::BooleanType => "bool".into(),
+            ValueType::CharType => "char".into(),
+            ValueType::StringType => "string".into(),
+            ValueType::IntegerType => "int".into(),
+            ValueType::FloatType => "float".into(),
+        };
+
+        Some(sh)
+    }
 }
 
 pub(crate) trait Callable<E: Evaluator> {

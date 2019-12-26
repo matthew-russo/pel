@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::evaluator::evaluator::{
     Callable, Enum, Environment, Evaluator, Function, NativeFunction, Object, ObjectInstance,
-    Symbol, SymbolId, SymbolTable, Module, SymHash
+    Symbol, SymbolId, SymbolTable, SymHash
 };
 use crate::syntax::parse_tree::*;
 
@@ -135,18 +135,15 @@ impl Evaluator for Interpreter {
 
     fn visit_object_declaration(&mut self, obj_decl: &ObjectDeclaration) {
         let mut local_env = Environment::from_parent(&self.current_env);
+        
+        let mut type_arguments = Vec::new(); 
         for type_param_name in obj_decl.type_params.iter() {
-            let symbol_id = self.symbol_table.new_symbol(Symbol::TypeVariable(None));
-            local_env.define(type_param_name.clone(), symbol_id);
+            let sym_hole_id = self.symbol_table.new_symbol(Symbol::TypeVariable(None));
+            local_env.define(type_param_name.clone(), sym_hole_id);
+            type_arguments.push((type_param_name.clone(), sym_hole_id));
         }
-        self.current_env = Arc::new(RwLock::new(local_env));
 
-        // TODO -> eerily similar to Evaluator::Function::from_function_decl_syntax
-        let type_arguments = obj_decl
-            .type_params
-            .iter()
-            .map(|t| (t.clone(), SymbolTable::EMPTY_TYPE_VARIABLE_ID))
-            .collect();
+        self.current_env = Arc::new(RwLock::new(local_env));
 
         let fields = obj_decl
             .fields
@@ -407,40 +404,45 @@ impl Evaluator for Interpreter {
             )
         };
 
-        // ensure that number of fields match
-        if obj_decl.fields.len() != obj_init.fields.len() {
-            let msg = format!(
-                "expected {} fields in object initialization but got {}",
-                obj_decl.fields.len(),
-                obj_init.fields.len()
-            );
-            panic!(msg);
-        }
+        // TODO -> need to validate that the object init doesn't have any fields that aren't in the
+        // object
 
-        for (key, _val) in obj_decl.fields.iter() {
+        let mut field_values = HashMap::new();
+        for (field_name, expected_ty_id_input) in obj_decl.fields.iter() {
             // ensure names of fields match
-            if !obj_init.fields.contains_key(key) {
+            if !obj_init.fields.contains_key(field_name) {
                 let msg = format!(
-                    "expected field {} in object initialization not present in {:?}",
-                    key,
+                    "expected field '{}' in object initialization not present in {:?}",
+                    field_name,
                     obj_init.fields.keys()
                 );
                 panic!(msg);
             }
 
-            // ensure types of fields match
-            // this uses val which is the expected type of the symbol
-        }
+            let mut expected_ty_id = expected_ty_id_input.clone();
+            let expected_ty = self.symbol_table.load_symbol(expected_ty_id);
+            if let Symbol::TypeVariable(maybe_tv_sym_id) = expected_ty.read().unwrap().deref() {
+                expected_ty_id = maybe_tv_sym_id.unwrap().clone();
+            }
 
-        let field_values = obj_init
-            .fields
-            .iter()
-            .map(|(k, v)| {
-                self.visit_expression(v);
-                let evaluated = self.last_local.take().unwrap();
-                (k.clone(), evaluated)
-            })
-            .collect();
+            let field_expr = obj_init.fields.get(field_name).unwrap();
+            self.visit_expression(&field_expr);
+            let evaluated_id = self.last_local.take().unwrap();
+            let evaluated = self.symbol_table.load_symbol(evaluated_id);
+            if evaluated.read().unwrap().get_type() != expected_ty_id {
+                let expected_ty = self.symbol_table.load_symbol(expected_ty_id);
+                let evaluated_ty = self.symbol_table.load_symbol(evaluated.read().unwrap().get_type());
+
+                let msg = format!(
+                    "expected field '{}' in object initialization to be type '{}' but got '{}'",
+                    field_name,
+                    expected_ty.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                    evaluated_ty.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                );
+                panic!(msg);
+            }
+            field_values.insert(field_name.clone(), evaluated_id);
+        }
 
         let initialized_object = ObjectInstance {
             ty: last_local_sym_id,
@@ -517,20 +519,65 @@ impl Evaluator for Interpreter {
 
         match new_type {
             Symbol::Object(ref mut o) => {
-                o.type_arguments = o
+                // create new sym_id
+                // update type args to use new sym_id
+                // update fields to use new sym_id
+
+                let mut old_sym_id_to_new_sym_id = HashMap::new();
+                let mut new_type_args = Vec::new();
+                let mut new_fields = HashMap::new();
+                let zipped_type_args_with_applied_type = o
                     .type_arguments
-                    .drain(..)
-                    .zip(types.into_iter())
-                    .map(|((type_name, _), type_to_apply)| (type_name, type_to_apply))
-                    .collect();
-            }
+                    .iter()
+                    .zip(types.into_iter());
+
+                for ((type_name, type_hole_sym_id), type_to_apply) in zipped_type_args_with_applied_type {
+                    let new_sym = Symbol::TypeVariable(Some(type_to_apply));
+                    let new_sym_id = self.symbol_table.get_or_create_symbol(new_sym);
+                    old_sym_id_to_new_sym_id.insert(type_hole_sym_id, new_sym_id);
+                    new_type_args.push((type_name.clone(), new_sym_id));
+
+                    for (field_name, field_sym_id) in o.fields.iter() {
+                        if field_sym_id == type_hole_sym_id {
+                            new_fields.insert(field_name.clone(), new_sym_id);
+                        }
+                    }
+                }
+
+                o.type_arguments = new_type_args;
+                o.fields = new_fields;
+
+            },
             Symbol::Enum(ref mut e) => {
-                e.type_arguments = e
+                // TODO -> this is copied and pasted from above. need to find where to put this logic
+
+                // create new sym_id
+                // update type args to use new sym_id
+                // update fields to use new sym_id
+
+                let mut old_sym_id_to_new_sym_id = HashMap::new();
+                let mut new_type_args = Vec::new();
+                let mut new_variants = HashMap::new();
+                let zipped_type_args_with_applied_type = e
                     .type_arguments
-                    .drain(..)
-                    .zip(types.into_iter())
-                    .map(|((type_name, _), type_to_apply)| (type_name, type_to_apply))
-                    .collect();
+                    .iter()
+                    .zip(types.into_iter());
+
+                for ((type_name, type_hole_sym_id), type_to_apply) in zipped_type_args_with_applied_type {
+                    let new_sym = Symbol::TypeVariable(Some(type_to_apply));
+                    let new_sym_id = self.symbol_table.get_or_create_symbol(new_sym);
+                    old_sym_id_to_new_sym_id.insert(type_hole_sym_id, new_sym_id);
+                    new_type_args.push((type_name.clone(), new_sym_id));
+
+                    for (field_name, field_sym_id) in e.variants.iter() {
+                        if field_sym_id == type_hole_sym_id {
+                            new_variants.insert(field_name.clone(), new_sym_id);
+                        }
+                    }
+                }
+
+                e.type_arguments = new_type_args;
+                e.variants = new_variants;
             }
             Symbol::Function(_f) => {
                 panic!("unimplemented");

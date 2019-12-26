@@ -1,5 +1,5 @@
 func main() {
-  let maybeMyName: Option<<Int>> := Option<<String>> {
+  let maybeMyName: Option<<string>> := Option<<string>> {
     contains: "Matthew Russo",
   };
 
@@ -12,3 +12,4 @@ object Option<<T>> {
     contains: T,
   }
 }
+

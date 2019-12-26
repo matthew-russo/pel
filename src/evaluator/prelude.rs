@@ -1,20 +1,25 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
-use lazy_static;
-
-use super::evaluator::{SymbolTable, SymbolId, Symbol, Object, NativeFunction, Module};
+use super::evaluator::{SymbolTable, SymbolId, Symbol, ValueType, NativeFunction};
 
 pub(super) fn prelude(symbol_table: &mut SymbolTable) -> HashMap<String, SymbolId> {
     let mut env = HashMap::new();
 
-    let string_object = Symbol::Object(string_object());
-    let string_symbol_id = symbol_table.new_symbol(string_object);
-    env.insert("String".into(), string_symbol_id);
+    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::BooleanType), SymbolTable::BOOL_TYPE_SYMBOL_ID);
+    env.insert("bool".into(), SymbolTable::BOOL_TYPE_SYMBOL_ID);
 
-    let integer_object = Symbol::Object(integer_object());
-    let integer_symbol_id = symbol_table.new_symbol(integer_object);
-    env.insert("Int".into(), integer_symbol_id);
+    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::CharType), SymbolTable::CHAR_TYPE_SYMBOL_ID);
+    env.insert("char".into(), SymbolTable::CHAR_TYPE_SYMBOL_ID);
+
+    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::StringType), SymbolTable::STRING_TYPE_SYMBOL_ID);
+    env.insert("string".into(), SymbolTable::STRING_TYPE_SYMBOL_ID);
+
+    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::IntegerType), SymbolTable::INT_TYPE_SYMBOL_ID);
+    env.insert("int".into(), SymbolTable::INT_TYPE_SYMBOL_ID);
+
+    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::FloatType), SymbolTable::FLOAT_TYPE_SYMBOL_ID);
+    env.insert("float".into(), SymbolTable::FLOAT_TYPE_SYMBOL_ID);
+
 
 
     let print_symbol_id = symbol_table.new_symbol(Symbol::NativeFunction(NativeFunction::Print));
@@ -23,44 +28,3 @@ pub(super) fn prelude(symbol_table: &mut SymbolTable) -> HashMap<String, SymbolI
     env
 }
 
-fn string_object() -> Object {
-    let type_arguments = Vec::new();
-
-    let mut fields = HashMap::new();
-    fields.insert("internal".into(), SymbolTable::STRING_TYPE_SYMBOL_ID);
-
-    let methods = Vec::new();
-
-    Object {
-        parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
-        name: "String".into(),
-        type_arguments,
-        fields,
-        methods,
-    }
-}
-
-fn integer_object() -> Object {
-    let type_arguments = Vec::new();
-
-    let mut fields = HashMap::new();
-    fields.insert("internal".into(), SymbolTable::INT_TYPE_SYMBOL_ID);
-
-    let methods = Vec::new();
-
-    Object {
-        parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
-        name: "Int".into(),
-        type_arguments,
-        fields,
-        methods,
-    }
-}
-
-// pub fn float_object() -> Object {
-// 
-// }
-// 
-// pub fn boolean_object() -> Object {
-// 
-// }

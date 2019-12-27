@@ -352,8 +352,29 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_conditional(&mut self, _conditional: &Conditional) {
-        panic!("unimplemented visit_conditional");
+    fn visit_conditional(&mut self, conditional: &Conditional) {
+        for if_expr in conditional.if_exprs.iter() {
+            self.visit_expression(&if_expr.condition);
+            let cond_sym_id = self.last_local.take().unwrap();
+            let cond_sym = self.symbol_table.load_symbol(cond_sym_id);
+            let cond_sym_readable = cond_sym.read().unwrap();
+            match cond_sym_readable.deref() {
+                Symbol::Value(Value::BooleanValue(cond)) => {
+                    if *cond {
+                        self.visit_block_body(&if_expr.body);
+                        return;
+                    }
+                },
+                s => {
+                    let message = format!("expected a 'bool' type in if condition but got: {}", s.sym_hash(&self.symbol_table).unwrap());
+                    panic!(message);
+                },
+            }
+        }
+
+        if let Some(else_body) = &conditional.else_expr {
+            self.visit_block_body(else_body);
+        }
     }
 
     fn visit_match(&mut self, _match_node: &Match) {

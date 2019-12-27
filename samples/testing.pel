@@ -1,15 +1,8 @@
 func main() {
-  let maybeMyName: Option<<string>> := Option<<string>> {
-    contains: "Matthew Russo",
+  if true {
+    print("hello world"); 
+  } else {
+    print("oops this wasn't supposed to print");
   };
-
-  print("Hello world");
-  print(maybeMyName.contains);
-}
-
-object Option<<T>> {
-  fields {
-    contains: T,
-  }
 }
 

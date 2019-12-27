@@ -677,24 +677,49 @@ impl Parser {
         loop {
             match self.current_token() {
                 Token::Dot => {
-                    let field_access = self.field_access()?;
-                    chained.push(ExpressionChain::FieldAccessNode(field_access));
+                    let current = self.current;
+                    if let Ok(field_access) = self.field_access() {
+                        chained.push(ExpressionChain::FieldAccessNode(field_access));
+                    } else {
+                        self.current = current;
+                        break;
+                    }
                 },
                 Token::DoubleColon => {
-                    let mod_access = self.module_access()?;
-                    chained.push(ExpressionChain::ModuleAccessNode(mod_access));
+                    let current = self.current;
+                    if let Ok(mod_access) = self.module_access() {
+                        chained.push(ExpressionChain::ModuleAccessNode(mod_access));
+                    } else {
+                        self.current = current;
+                        break;
+                    }
                 },
                 Token::OpenCurlyBracket => {
-                    let obj_init = self.object_initialization()?;
-                    chained.push(ExpressionChain::ObjectInitializationNode(obj_init));
+                    let current = self.current;
+                    if let Ok(obj_init) = self.object_initialization() {
+                        chained.push(ExpressionChain::ObjectInitializationNode(obj_init));
+                    } else {
+                        self.current = current;
+                        break;
+                    }
                 },
                 Token::OpenParen => {
-                    let func_app = self.function_application()?;
-                    chained.push(ExpressionChain::FunctionApplicationNode(func_app));
+                    let current = self.current;
+                    if let Ok(func_app) = self.function_application() {
+                        chained.push(ExpressionChain::FunctionApplicationNode(func_app));
+                    } else {
+                        self.current = current;
+                        break;
+                    }
                 },
                 Token::OpenDoubleAngleBracket => {
-                    let type_application = self.type_application()?;
-                    chained.push(ExpressionChain::TypeApplicationNode(type_application));
+                    let current = self.current;
+                    if let Ok(type_application) = self.type_application() {
+                        chained.push(ExpressionChain::TypeApplicationNode(type_application));
+                    } else {
+                        self.current = current;
+                        break;
+                    }
                 },
                 Token::Plus => {
                     self.expect(Token::Plus, "chainable_expr")?;
@@ -927,6 +952,7 @@ impl Parser {
             match self.tokens[self.current] {
                 Token::If => if_exprs.push(self.if_expr()?),
                 Token::OpenCurlyBracket => {
+                    self.expect(Token::OpenCurlyBracket, "conditional_expr")?;
                     let block_body = self.block_body()?;
                     self.expect(Token::CloseCurlyBracket, "conditional_expr")?;
                     else_expr = Some(block_body);
@@ -935,7 +961,7 @@ impl Parser {
                 _ => return Err(ParseError::Message("unable to parse else-if or else epxressions".to_string())),
             }
         }
-
+        
         Ok(Conditional {
             if_exprs,
             else_expr,

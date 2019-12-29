@@ -92,6 +92,10 @@ impl SymbolTable {
         self.symbols.get(&id).unwrap().clone()
     }
 
+    pub fn replace_symbol(&mut self, dest_id: SymbolId, value: Arc<RwLock<Symbol>>) {
+        self.symbols.insert(dest_id, value); 
+    }
+
     pub fn reassign_id(&mut self, dest_id: SymbolId, value_id: SymbolId) {
         let value = self.load_symbol(value_id);
         self.symbols.insert(dest_id, value);
@@ -145,7 +149,7 @@ pub(crate) trait SymHash {
     fn sym_hash(&self, table: &SymbolTable) -> Option<String>;
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Symbol {
     Module(Module),
     Contract(Contract),
@@ -262,7 +266,7 @@ impl SymHash for Symbol {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Module {
     pub parent: Option<Arc<RwLock<Module>>>,
     pub name: String,
@@ -359,7 +363,7 @@ pub(crate) struct Enum {
     pub name: String,
     pub type_arguments: Vec<(String, SymbolId)>,
     pub variants: HashMap<String, Option<SymbolId>>,
-    pub variant_funcs: HashMap<String, NativeFunction>,
+    pub variant_funcs: HashMap<String, Symbol>,
     pub methods: Vec<Function>,
 }
 

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
 use crate::evaluator::evaluator::{
@@ -175,129 +175,139 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let variant_funcs = enum_decl.variants
-            .iter()
-            .map(|vd| {
-                let enum_constructor = |interp: &mut Interpreter, args: &Vec<Expression>| {
-                    interp.visit_expression(args.iter().nth(0).unwrap());
-                    let ty_sym_id = interp.last_local.take().unwrap();
-                    let ty_sym = interp.symbol_table.load_symbol(ty_sym_id);
-                    let ty_sym_readable = ty_sym.read().unwrap();
-                    let ty = match ty_sym_readable.deref() {
-                        Symbol::Value(Value::IntegerValue(i)) => *i as u32,
-                        _ => {
-                            let message = format!("COMPILER BUG: first argument to enum variant constructor should be an integer -- the SymbolId of the enum -- but was {}",
-                                                  ty_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                            panic!(message);
-                        },
-                    };
-
-                    interp.visit_expression(args.iter().nth(1).unwrap());
-                    let name_sym_id = interp.last_local.take().unwrap();
-                    let name_sym = interp.symbol_table.load_symbol(name_sym_id);
-                    let name_sym_readable = name_sym.read().unwrap();
-                    let name = match name_sym_readable.deref() {
-                        Symbol::Value(Value::StringValue(s)) => s.clone(),
-                        _ => {
-                            let message = format!("COMPILER BUG: second argument to enum variant constructor should be a string -- the name of the variant -- but was {}",
-                                                  name_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                            panic!(message);
-                        },
-                    };
-
-                    interp.visit_expression(args.iter().nth(2).unwrap());
-                    let does_contain_type_sym_id = interp.last_local.take().unwrap();
-                    let does_contain_type_sym = interp.symbol_table.load_symbol(does_contain_type_sym_id);
-                    let does_contain_type_sym_readable = does_contain_type_sym.read().unwrap();
-                    let does_contain_type = match does_contain_type_sym_readable.deref() {
-                        Symbol::Value(Value::BooleanValue(b)) => *b,
-                        _ => {
-                            let message = format!("COMPILER BUG: third argument to enum variant constructor should be a boolean -- whether the variant contains a type -- but was {}",
-                                                  does_contain_type_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                            panic!(message);
-                        },
-                    };
-
-                    let contains = if does_contain_type {
-                        interp.visit_expression(args.iter().nth(3).unwrap());
-                        let contains_type_id_sym_id = interp.last_local.take().unwrap();
-                        let contains_type_id_sym = interp.symbol_table.load_symbol(contains_type_id_sym_id);
-                        let contains_type_id_sym_readable = contains_type_id_sym.read().unwrap();
-                        let contains_type_id = match contains_type_id_sym_readable.deref() {
-                            Symbol::Value(Value::IntegerValue(i)) => *i as u32 as SymbolId,
-                            _ => {
-                                let message = format!("COMPILER BUG: fourth argument to enum variant constructor should be an Integer -- the SymbolId of the type it contains -- but was {}",
-                                                      contains_type_id_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                                panic!(message);
-                            },
-                        };
-
-                        interp.visit_expression(args.iter().nth(4).unwrap());
-                        let contains_sym_id = interp.last_local.take().unwrap();
-                        let contains_sym = interp.symbol_table.load_symbol(contains_sym_id);
-                        let contains_sym_readable = contains_sym.read().unwrap();
-                        if contains_type_id != contains_sym_readable.get_type() {
-                            let supposed_to_contain = interp.symbol_table.load_symbol(contains_type_id);
-                            let supposed_to_contain_readable = supposed_to_contain.read().unwrap();
-
-                            let actually_contains = interp.symbol_table.load_symbol(contains_sym_readable.get_type());
-                            let actually_contains_readable = actually_contains.read().unwrap();
-                            let message = format!("expected enum variant: {} to contain type {}, but got {}",
-                                                  name,
-                                                  supposed_to_contain_readable.sym_hash(&interp.symbol_table).unwrap(),
-                                                  actually_contains_readable.sym_hash(&interp.symbol_table).unwrap());
-                            panic!(message);
-                        }
-                        
-                        Some(contains_sym_id)
-                    } else {
-                        None
-                    };
-                    
-                    let initialized_enum = EnumInstance {
-                        ty,
-                        variant: (name, contains),
-                    };
-
-                    Some(interp.symbol_table.new_symbol(Symbol::EnumInstance(initialized_enum)))
-                };
-
-                let nat_func = NativeFunction {
-                    name: "".into(),
-                    args: Vec::new(),
-                    func: enum_constructor,
-                };
-                (vd.name.clone(), nat_func)
-            })
-            .collect();
-
         let mut enu = Enum {
             parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
             name: enum_decl.type_name.clone(),
             type_arguments,
             variants,
-            variant_funcs,
+            variant_funcs: HashMap::new(),
             methods: Vec::new(),
         };
 
-        let sym_id = self.symbol_table.gen_id();
+        let enu_sym_id = self.symbol_table.gen_id();
+
+        enu.variant_funcs = enum_decl.variants
+            .iter()
+            .map(|vd| {
+                if vd.contains.is_none() {
+                    let initialized_enum = EnumInstance {
+                        ty: enu_sym_id,
+                        variant: (vd.name.clone(), None),
+                    };
+
+                    (vd.name.clone(), Symbol::EnumInstance(initialized_enum))
+                } else {
+                    let enum_constructor = |interp: &mut Interpreter, args: &Vec<Expression>| {
+                        interp.visit_expression(args.iter().nth(0).unwrap());
+                        let ty_sym_id = interp.last_local.take().unwrap();
+                        let ty_sym = interp.symbol_table.load_symbol(ty_sym_id);
+                        let ty_sym_readable = ty_sym.read().unwrap();
+                        let ty = match ty_sym_readable.deref() {
+                            Symbol::Value(Value::IntegerValue(i)) => *i as u32,
+                            _ => {
+                                let message = format!("COMPILER BUG: first argument to enum variant constructor should be an integer -- the SymbolId of the enum -- but was {}",
+                                                      ty_sym_readable.sym_hash(&interp.symbol_table).unwrap());
+                                panic!(message);
+                            },
+                        };
+
+                        interp.visit_expression(args.iter().nth(1).unwrap());
+                        let name_sym_id = interp.last_local.take().unwrap();
+                        let name_sym = interp.symbol_table.load_symbol(name_sym_id);
+                        let name_sym_readable = name_sym.read().unwrap();
+                        let name = match name_sym_readable.deref() {
+                            Symbol::Value(Value::StringValue(s)) => s.clone(),
+                            _ => {
+                                let message = format!("COMPILER BUG: second argument to enum variant constructor should be a string -- the name of the variant -- but was {}",
+                                                      name_sym_readable.sym_hash(&interp.symbol_table).unwrap());
+                                panic!(message);
+                            },
+                        };
+
+                        interp.visit_expression(args.iter().nth(2).unwrap());
+                        let does_contain_type_sym_id = interp.last_local.take().unwrap();
+                        let does_contain_type_sym = interp.symbol_table.load_symbol(does_contain_type_sym_id);
+                        let does_contain_type_sym_readable = does_contain_type_sym.read().unwrap();
+                        let does_contain_type = match does_contain_type_sym_readable.deref() {
+                            Symbol::Value(Value::BooleanValue(b)) => *b,
+                            _ => {
+                                let message = format!("COMPILER BUG: third argument to enum variant constructor should be a boolean -- whether the variant contains a type -- but was {}",
+                                                      does_contain_type_sym_readable.sym_hash(&interp.symbol_table).unwrap());
+                                panic!(message);
+                            },
+                        };
+
+                        let contains = if does_contain_type {
+                            interp.visit_expression(args.iter().nth(3).unwrap());
+                            let contains_type_id_sym_id = interp.last_local.take().unwrap();
+                            let contains_type_id_sym = interp.symbol_table.load_symbol(contains_type_id_sym_id);
+                            let contains_type_id_sym_readable = contains_type_id_sym.read().unwrap();
+                            let contains_type_id = match contains_type_id_sym_readable.deref() {
+                                Symbol::Value(Value::IntegerValue(i)) => *i as u32 as SymbolId,
+                                _ => {
+                                    let message = format!("COMPILER BUG: fourth argument to enum variant constructor should be an Integer -- the SymbolId of the type it contains -- but was {}",
+                                                          contains_type_id_sym_readable.sym_hash(&interp.symbol_table).unwrap());
+                                    panic!(message);
+                                },
+                            };
+
+                            interp.visit_expression(args.iter().nth(4).unwrap());
+                            let contains_sym_id = interp.last_local.take().unwrap();
+                            let contains_sym = interp.symbol_table.load_symbol(contains_sym_id);
+                            let contains_sym_readable = contains_sym.read().unwrap();
+                            if contains_type_id != contains_sym_readable.get_type() {
+                                let supposed_to_contain = interp.symbol_table.load_symbol(contains_type_id);
+                                let supposed_to_contain_readable = supposed_to_contain.read().unwrap();
+
+                                let actually_contains = interp.symbol_table.load_symbol(contains_sym_readable.get_type());
+                                let actually_contains_readable = actually_contains.read().unwrap();
+                                let message = format!("expected enum variant: {} to contain type {}, but got {}",
+                                                      name,
+                                                      supposed_to_contain_readable.sym_hash(&interp.symbol_table).unwrap(),
+                                                      actually_contains_readable.sym_hash(&interp.symbol_table).unwrap());
+                                panic!(message);
+                            }
+                            
+                            Some(contains_sym_id)
+                        } else {
+                            None
+                        };
+                        
+                        let initialized_enum = EnumInstance {
+                            ty,
+                            variant: (name, contains),
+                        };
+
+                        Some(interp.symbol_table.new_symbol(Symbol::EnumInstance(initialized_enum)))
+                    };
+
+                    let nat_func = NativeFunction {
+                        name: "".into(),
+                        args: Vec::new(),
+                        func: enum_constructor,
+                    };
+
+                    (vd.name.clone(), Symbol::NativeFunction(nat_func))
+                }
+            })
+            .collect();
 
         enu.methods = enum_decl
             .methods
             .iter()
-            .map(|fd| Function::from_function_decl_syntax(sym_id.clone(), fd, &self.global_env))
+            .map(|fd| Function::from_function_decl_syntax(enu_sym_id.clone(), fd, &self.global_env))
             .collect();
 
-        let obj_sym = Symbol::Enum(enu);
+        let enu_sym = Symbol::Enum(enu);
 
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
         self.current_env = parent_env;
 
-        self.symbol_table.new_symbol_with_id(obj_sym, sym_id);
+        self.symbol_table.new_symbol_with_id(enu_sym, enu_sym_id);
         self.current_env
             .write()
             .unwrap()
-            .define(enum_decl.type_name.clone(), sym_id);
+            .define(enum_decl.type_name.clone(), enu_sym_id);
     }
 
     fn visit_object_declaration(&mut self, obj_decl: &ObjectDeclaration) {
@@ -462,6 +472,10 @@ impl Evaluator for Interpreter {
             let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
             let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
 
+            println!("SYMBOL_TABLE: {:?}", self.symbol_table);
+            println!("TARGET: {:?}", target_type_sym);
+            println!("VALUE: {:?}", value_type_sym);
+
             panic!("expected a value of type: {}, but got {}",
                    target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
                    value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
@@ -619,7 +633,11 @@ impl Evaluator for Interpreter {
                 // this special function defined inside of a the hidden module
 
                 match enu.variant_funcs.get(&mod_access.name) {
-                    Some(func) => {
+                    Some(Symbol::EnumInstance(ei)) => {
+                        let id = self.symbol_table.new_symbol(Symbol::EnumInstance(EnumInstance::clone(ei)));
+                        self.last_local = Some(id);
+                    },
+                    Some(Symbol::NativeFunction(func)) => {
                         let mut cloned_func = func.clone();
 
                         let ty = Expression::ChainableExpressionNode(
@@ -663,17 +681,25 @@ impl Evaluator for Interpreter {
                                 _ => *contains_id,
                             };
                             let contain_ty = Expression::ChainableExpressionNode(
-                            Box::new(ChainableExpression {
-                                start: ExpressionStart::ValueNode(Value::IntegerValue(actually_contains_id as i32)),
-                                chained: Vec::new(),
-                            })
-                        );
+                                Box::new(ChainableExpression {
+                                    start: ExpressionStart::ValueNode(Value::IntegerValue(actually_contains_id as i32)),
+                                    chained: Vec::new(),
+                                })
+                            );
                             cloned_func.args.push(contain_ty);
                         }
                     
                         let id = self.symbol_table.new_symbol(Symbol::NativeFunction(cloned_func));
                         self.last_local = Some(id);
+
                     },
+                    Some(sym) => {
+                        let message = format!("COMILER BUG: Enum {} has variant {} but it is {} and not an EnumInstance or NativeFunction",
+                                              enu.sym_hash(&self.symbol_table).unwrap(),
+                                              mod_access.name,
+                                              sym.sym_hash(&self.symbol_table).unwrap());
+                        panic!(message);
+                    }
                     None => {
                         let message = format!("Enum {} has no variant {}",
                                               enu.sym_hash(&self.symbol_table).unwrap(),
@@ -782,7 +808,10 @@ impl Evaluator for Interpreter {
                     self.last_local = Some(sym_id);
                 }
             }
-            _ => panic!("attempting to apply arguments to something that isn't a function"),
+            sym => {
+                panic!("attempting to apply arguments to {} which isn't a function",
+                          sym.sym_hash(&self.symbol_table).unwrap());
+            }
         }
     }
 
@@ -827,12 +856,13 @@ impl Evaluator for Interpreter {
         // TODO -> merge this with below and clean up, reduce duplication
         let to_apply_to_readable = to_apply_to.read().unwrap();
         let mut new_type = match to_apply_to_readable.deref() {
-            Symbol::Object(obj)    => Symbol::Object(Object::clone(obj)),
-            Symbol::Enum(enu)      => Symbol::Enum(Enum::clone(enu)),
+            Symbol::Object(obj)     => Symbol::Object(Object::clone(obj)),
+            Symbol::Enum(enu)       => Symbol::Enum(Enum::clone(enu)),
             Symbol::Function(_func) => panic!("unimplemented"),
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         };
 
+        // adjust fields and types 
         match new_type {
             Symbol::Object(ref mut o) => {
                 // create new sym_id
@@ -898,15 +928,30 @@ impl Evaluator for Interpreter {
 
                 e.type_arguments = new_type_args;
                 e.variants = new_variants;
-            }
+            },
             Symbol::Function(_f) => {
                 panic!("unimplemented");
-            }
+            },
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         }
 
         // we need to check if the equivalent type already exists
-        let sym_id = self.symbol_table.get_or_create_symbol(new_type);
+        let sym_id = self.symbol_table.get_or_create_symbol(Symbol::clone(&new_type));
+        let sym = self.symbol_table.load_symbol(sym_id);
+        {
+            let mut sym_readable = sym.write().unwrap();
+            match sym_readable.deref_mut() {
+                Symbol::Enum(ref mut e) => {
+                    for (_, variant_sym) in e.variant_funcs.iter_mut() {
+                        if let Symbol::EnumInstance(ei) = variant_sym {
+                            ei.ty = sym_id.clone();
+                        }
+                    }
+                },
+                _ => ()
+            }
+        }
+        self.symbol_table.replace_symbol(sym_id, sym);
         self.last_local = Some(sym_id);
     }
 

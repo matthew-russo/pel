@@ -757,6 +757,60 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
+                Token::LessThan => {
+                    self.expect(Token::LessThan, "chainable_expr")?;
+                    let rhs = self.expression()?;
+                    let bin_op = BinaryOperation {
+                        op: BinaryOperator::LessThan,
+                        rhs: rhs,
+                    };
+                    chained.push(ExpressionChain::BinaryOperationNode(bin_op));
+                },
+                Token::LessThanOrEqual => {
+                    self.expect(Token::LessThanOrEqual, "chainable_expr")?;
+                    let rhs = self.expression()?;
+                    let bin_op = BinaryOperation {
+                        op: BinaryOperator::LessThanOrEqual,
+                        rhs: rhs,
+                    };
+                    chained.push(ExpressionChain::BinaryOperationNode(bin_op));
+                },
+                Token::GreaterThan => {
+                    self.expect(Token::GreaterThan, "chainable_expr")?;
+                    let rhs = self.expression()?;
+                    let bin_op = BinaryOperation {
+                        op: BinaryOperator::GreaterThan,
+                        rhs: rhs,
+                    };
+                    chained.push(ExpressionChain::BinaryOperationNode(bin_op));
+                },
+                Token::GreaterThanOrEqual => {
+                    self.expect(Token::GreaterThanOrEqual, "chainable_expr")?;
+                    let rhs = self.expression()?;
+                    let bin_op = BinaryOperation {
+                        op: BinaryOperator::GreaterThanOrEqual,
+                        rhs: rhs,
+                    };
+                    chained.push(ExpressionChain::BinaryOperationNode(bin_op));
+                },
+                Token::EqualTo => {
+                    self.expect(Token::EqualTo, "chainable_expr")?;
+                    let rhs = self.expression()?;
+                    let bin_op = BinaryOperation {
+                        op: BinaryOperator::Equal,
+                        rhs: rhs,
+                    };
+                    chained.push(ExpressionChain::BinaryOperationNode(bin_op));
+                },
+                Token::NotEqualTo => {
+                    self.expect(Token::NotEqualTo, "chainable_expr")?;
+                    let rhs = self.expression()?;
+                    let bin_op = BinaryOperation {
+                        op: BinaryOperator::NotEqual,
+                        rhs: rhs,
+                    };
+                    chained.push(ExpressionChain::BinaryOperationNode(bin_op));
+                },
                 Token::LogicalAnd => {
                     self.expect(Token::LogicalAnd, "chainable_expr")?;
                     let rhs = self.expression()?;
@@ -1005,7 +1059,7 @@ impl Parser {
         self.expect(Token::Semicolon, "loop_expr")?;
         let condition = self.expression()?;
         self.expect(Token::Semicolon, "loop_expr")?;
-        let step = self.expression()?;
+        let step = self.statement()?;
         self.expect(Token::OpenCurlyBracket, "loop_expr")?;
         let body = self.block_body()?;
         self.expect(Token::CloseCurlyBracket, "loop_expr")?;
@@ -1030,8 +1084,6 @@ impl Parser {
         self.expect(Token::Assignment, "variable_assignment")?;
 
         let value = self.expression()?;
-
-        self.expect(Token::Semicolon, "variable_assignment")?;
 
         Ok(VariableAssignment {
             target,

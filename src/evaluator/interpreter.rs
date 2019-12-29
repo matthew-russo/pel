@@ -65,7 +65,7 @@ impl Interpreter {
         self.errors.push(error);
     }
 
-    fn var_name(assignment_node: &VariableAssignment) -> Option<String> {
+    fn var_name_to_define(&mut self, assignment_node: &VariableAssignment) -> Option<String> {
         let ce = if let Expression::ChainableExpressionNode(ce) = &assignment_node.target {
             ce
         } else {
@@ -88,7 +88,11 @@ impl Interpreter {
             Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
         };
 
-        Some(var_name)
+        if let None = self.current_env.read().unwrap().get_symbol_by_name(&var_name) {
+            Some(var_name) 
+        } else {
+            None
+        }
     }
 
     pub fn set_current_env(&mut self, env: Environment) {
@@ -243,6 +247,8 @@ impl Evaluator for Interpreter {
 
             self.visit_statement(stmt);
         }
+
+        self.exiting = false;
     }
 
     fn visit_statement(&mut self, statement: &Statement) {
@@ -250,39 +256,7 @@ impl Evaluator for Interpreter {
 
         match statement {
             VariableAssignmentNode(var_assignment) => {
-                if let Some(var_name) = Self::var_name(var_assignment) {
-                    let symbol_id = self
-                        .symbol_table
-                        .new_symbol(Symbol::Value(Value::IntegerValue(0)));
-
-                    self.current_env
-                        .write()
-                        .unwrap()
-                        // TODO -> This isn't right...
-                        .define(var_name, symbol_id);
-                }
-
-                self.visit_expression(&var_assignment.target);
-                let target_sym_id = self.last_local.take().unwrap();
-
-                self.visit_expression(&var_assignment.target_type);
-                let target_type_sym_id = self.last_local.take().unwrap();
-
-                self.visit_expression(&var_assignment.value);
-                let value_sym_id = self.last_local.take().unwrap();
-
-                let value = self.symbol_table.load_symbol(value_sym_id);
-                let value_type_sym_id = value.read().unwrap().get_type();
-
-                if value_type_sym_id != target_type_sym_id {
-                    let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
-                    let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
-                    panic!("expected a value of type: {}, but got {}",
-                           target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
-                           value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
-                }
-
-                self.symbol_table.reassign_id(target_sym_id, value_sym_id);
+                self.visit_variable_assignment(var_assignment);
             }
             ReturnNode(return_node) => {
                 self.visit_return(&return_node);
@@ -294,7 +268,39 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_variable_assignment(&mut self, var_assignment: &VariableAssignment) {
-        panic!("unimplemented visit_variable_assignment");
+        if let Some(var_name) = self.var_name_to_define(var_assignment) {
+            let symbol_id = self
+                .symbol_table
+                .new_symbol(Symbol::Value(Value::IntegerValue(0)));
+
+            self.current_env
+                .write()
+                .unwrap()
+                // TODO -> This isn't right...
+                .define(var_name, symbol_id);
+        }
+
+        self.visit_expression(&var_assignment.target);
+        let target_sym_id = self.last_local.take().unwrap();
+
+        self.visit_expression(&var_assignment.target_type);
+        let target_type_sym_id = self.last_local.take().unwrap();
+
+        self.visit_expression(&var_assignment.value);
+        let value_sym_id = self.last_local.take().unwrap();
+
+        let value = self.symbol_table.load_symbol(value_sym_id);
+        let value_type_sym_id = value.read().unwrap().get_type();
+
+        if value_type_sym_id != target_type_sym_id {
+            let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
+            let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
+            panic!("expected a value of type: {}, but got {}",
+                   target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                   value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
+        }
+
+        self.symbol_table.reassign_id(target_sym_id, value_sym_id);
     }
 
     fn visit_return(&mut self, return_stmt: &Return) {
@@ -340,6 +346,7 @@ impl Evaluator for Interpreter {
             }
         };
 
+
         for expr_chain in chainable_expr.chained.iter() {
             match expr_chain {
                 FieldAccessNode(field_access) => self.visit_field_access(field_access),
@@ -381,8 +388,42 @@ impl Evaluator for Interpreter {
         panic!("unimplemented visit_match");
     }
 
-    fn visit_loop(&mut self, _loop_node: &Loop) {
-        panic!("unimplemented visit_loop");
+// #[derive(Debug, Clone)]
+// pub(crate) struct Loop {
+//     // TODO -> this doesn't need to be a variable assignment
+//     pub init: VariableAssignment,
+//     pub condition: Expression,
+//     pub step: Statement,
+//     pub body: BlockBody,
+// }
+    fn visit_loop(&mut self, loop_node: &Loop) {
+        let loop_local_env = Environment::from_parent(&self.current_env);
+        self.current_env = Arc::new(RwLock::new(loop_local_env));
+
+        self.visit_variable_assignment(&loop_node.init);
+       
+        let condition_checker = |interp: &mut Interpreter| {
+            interp.visit_expression(&loop_node.condition);
+            let cond_sym_id = interp.last_local.take().unwrap();
+            let cond_sym = interp.symbol_table.load_symbol(cond_sym_id);
+            let cond_sym_readable = cond_sym.read().unwrap();
+            return match cond_sym_readable.deref() {
+                Symbol::Value(Value::BooleanValue(b)) => *b,
+                _ => {
+                    let cond_sym_ty = interp.symbol_table.load_symbol(cond_sym_readable.get_type());
+                    panic!("expected loop condition to be a 'bool' but got {}",
+                            cond_sym_ty.read().unwrap().sym_hash(&interp.symbol_table).unwrap());
+                },
+            }
+        };
+
+        while condition_checker(self) {
+            self.visit_block_body(&loop_node.body);
+            self.visit_statement(&loop_node.step);
+        }
+
+        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        self.current_env = parent_env;
     }
 
     fn visit_field_access(&mut self, field_access: &FieldAccess) {
@@ -645,12 +686,18 @@ impl Evaluator for Interpreter {
         };
 
         let result = match bin_op.op {
-            Plus => Symbol::Value(Value::add(lhs, rhs)),
-            Minus => Symbol::Value(Value::subtract(lhs, rhs)),
-            Multiply => Symbol::Value(Value::multiply(lhs, rhs)),
-            Divide => Symbol::Value(Value::divide(lhs, rhs)),
-            Or => Symbol::Value(Value::or(lhs, rhs)),
-            And => Symbol::Value(Value::and(lhs, rhs)),
+            Plus =>               Symbol::Value(Value::add(lhs, rhs)),
+            Minus =>              Symbol::Value(Value::subtract(lhs, rhs)),
+            Multiply =>           Symbol::Value(Value::multiply(lhs, rhs)),
+            Divide =>             Symbol::Value(Value::divide(lhs, rhs)),
+            LessThan =>           Symbol::Value(Value::less_than(lhs, rhs)),
+            LessThanOrEqual =>    Symbol::Value(Value::less_than_or_equal(lhs, rhs)),
+            GreaterThan =>        Symbol::Value(Value::greater_than(lhs, rhs)),
+            GreaterThanOrEqual => Symbol::Value(Value::greater_than_or_equal(lhs, rhs)),
+            Equal =>              Symbol::Value(Value::equal_to(lhs, rhs)),
+            NotEqual =>           Symbol::Value(Value::not_equal_to(lhs, rhs)),
+            Or =>                 Symbol::Value(Value::or(lhs, rhs)),
+            And =>                Symbol::Value(Value::and(lhs, rhs)),
         };
 
         let sym_id = self.symbol_table.new_symbol(result);

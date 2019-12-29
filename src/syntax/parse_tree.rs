@@ -216,28 +216,74 @@ impl Value {
         }
     }
 
+    // TODO -> This should take floats too
     pub fn add(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Value::IntegerValue(lhs + rhs);
     }
 
+    // TODO -> This should take floats too
     pub fn subtract(lhs: Self, rhs: Self) -> Value {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Value::IntegerValue(lhs - rhs);
     }
 
+    // TODO -> This should take floats too
     pub fn multiply(lhs: Self, rhs: Self) -> Value {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Value::IntegerValue(lhs * rhs);
     }
 
+    // TODO -> This should take floats too
     pub fn divide(lhs: Self, rhs: Self) -> Value {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Value::IntegerValue(lhs / rhs);
+    }
+
+    // TODO -> This should take floats too
+    pub fn less_than(lhs: Self, rhs: Self) -> Value {
+        let lhs = lhs.to_int().unwrap();
+        let rhs = rhs.to_int().unwrap();
+        return Value::BooleanValue(lhs < rhs);
+    }
+
+    // TODO -> This should take floats too
+    pub fn less_than_or_equal(lhs: Self, rhs: Self) -> Value {
+        let lhs = lhs.to_int().unwrap();
+        let rhs = rhs.to_int().unwrap();
+        return Value::BooleanValue(lhs <= rhs);
+    }
+
+    // TODO -> This should take floats too
+    pub fn greater_than(lhs: Self, rhs: Self) -> Value {
+        let lhs = lhs.to_int().unwrap();
+        let rhs = rhs.to_int().unwrap();
+        return Value::BooleanValue(lhs > rhs);
+    }
+
+    // TODO -> This should take floats too
+    pub fn greater_than_or_equal(lhs: Self, rhs: Self) -> Value {
+        let lhs = lhs.to_int().unwrap();
+        let rhs = rhs.to_int().unwrap();
+        return Value::BooleanValue(lhs >= rhs);
+    }
+
+    // TODO -> This should take any value type
+    pub fn equal_to(lhs: Self, rhs: Self) -> Value {
+        let lhs = lhs.to_int().unwrap();
+        let rhs = rhs.to_int().unwrap();
+        return Value::BooleanValue(lhs == rhs);
+    }
+
+    // TODO -> This should take any value type
+    pub fn not_equal_to(lhs: Self, rhs: Self) -> Value {
+        let lhs = lhs.to_int().unwrap();
+        let rhs = rhs.to_int().unwrap();
+        return Value::BooleanValue(lhs != rhs);
     }
 
     pub fn or(lhs: Self, rhs: Self) -> Value {
@@ -279,7 +325,7 @@ pub(crate) struct Loop {
     // TODO -> this doesn't need to be a variable assignment
     pub init: VariableAssignment,
     pub condition: Expression,
-    pub step: Expression,
+    pub step: Statement,
     pub body: BlockBody,
 }
 
@@ -302,6 +348,12 @@ pub(crate) enum BinaryOperator {
     Minus,
     Multiply,
     Divide,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    Equal,
+    NotEqual,
     Or,
     And,
 //     BitwiseOr,

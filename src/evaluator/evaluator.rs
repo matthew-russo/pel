@@ -1,8 +1,8 @@
 use crate::syntax::parse_tree::*;
-use super::prelude;
+use super::{prelude, interpreter::Interpreter};
 
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
 pub(crate) type SymbolId = u32;
@@ -31,13 +31,25 @@ impl SymbolTable {
         let mut symbols = HashMap::new();
 
         symbols.insert(Self::EMPTY_TYPE_VARIABLE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::TypeVariable(None))));
-        symbols.insert(Self::MAIN_MODULE_SYMBOL_ID,         Arc::new(RwLock::new(Symbol::Module(Module { parent: None, name: "main".into(), } ))));
+        symbols.insert(Self::MAIN_MODULE_SYMBOL_ID,         Arc::new(RwLock::new(Symbol::Module(Module {
+            parent: None,
+            name: "main".into(),
+            env: Arc::new(RwLock::new(Environment::root())),
+        } ))));
 
-        Self {
+        let mut sym_table = Self {
             next_id: 10,
             sym_hash_to_sym_id: HashMap::new(),
             symbols,
+        };
+
+        let main_sym = sym_table.load_symbol(Self::MAIN_MODULE_SYMBOL_ID);
+        let mut main_sym_writable = main_sym.write().unwrap();
+        if let Symbol::Module(main) = main_sym_writable.deref_mut() {
+            main.env.write().unwrap().overwrite_with(prelude::prelude(&mut sym_table));
         }
+
+        sym_table
     }
 
     pub fn new_symbol(&mut self, sym: Symbol) -> SymbolId {
@@ -94,10 +106,10 @@ pub(crate) struct Environment {
 }
 
 impl Environment {
-    pub fn global(symbol_table: &mut SymbolTable) -> Self {
+    pub fn root() -> Self {
         Self {
             parent: None,
-            locals: prelude::prelude(symbol_table),
+            locals: HashMap::new(),
         }
     }
 
@@ -106,6 +118,10 @@ impl Environment {
             parent: Some(parent.clone()),
             locals: HashMap::new(),
         }
+    }
+
+    pub fn overwrite_with(&mut self, new_locals: HashMap<String, SymbolId>) {
+        self.locals = new_locals;
     }
 
     pub fn define(&mut self, name: String, value: SymbolId) {
@@ -129,7 +145,7 @@ pub(crate) trait SymHash {
     fn sym_hash(&self, table: &SymbolTable) -> Option<String>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum Symbol {
     Module(Module),
     Contract(Contract),
@@ -153,7 +169,6 @@ pub(crate) enum Symbol {
 
 impl Symbol {
     // get_size(&mut self) -> u64;
-    // get_type(&mut self) -> Type;
     // defined_at(&mut self) -> Span;
 
     pub fn get_type(&self) -> SymbolId {
@@ -247,10 +262,11 @@ impl SymHash for Symbol {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Module {
     pub parent: Option<Arc<RwLock<Module>>>,
     pub name: String,
+    pub env: Arc<RwLock<Environment>>,
 }
 
 impl SymHash for Module {
@@ -339,16 +355,18 @@ pub(crate) struct ObjectInstance {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Enum {
-    pub module: Arc<RwLock<Module>>,
+    pub parent: SymbolId,
     pub name: String,
     pub type_arguments: Vec<(String, SymbolId)>,
-    pub variants: HashMap<String, SymbolId>,
+    pub variants: HashMap<String, Option<SymbolId>>,
+    pub variant_funcs: HashMap<String, NativeFunction>,
     pub methods: Vec<Function>,
 }
 
 impl SymHash for Enum {
     fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        let hash = self.module.read().unwrap().sym_hash(table).unwrap();
+        let parent = table.load_symbol(self.parent);
+        let hash = parent.read().unwrap().sym_hash(table).unwrap();
 
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_sym_hash = self.type_arguments
@@ -369,7 +387,7 @@ impl SymHash for Enum {
 #[derive(Clone, Debug)]
 pub(crate) struct EnumInstance {
     pub ty: SymbolId,
-    pub variant: (String, Box<SymbolId>),
+    pub variant: (String, Option<SymbolId>),
 }
 
 #[derive(Clone, Debug)]
@@ -418,9 +436,17 @@ impl SymHash for Function {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum NativeFunction {
-    Print,
+#[derive(Clone)]
+pub(crate) struct NativeFunction {
+    pub name: String,
+    pub args: Vec<Expression>,
+    pub func: fn(&mut Interpreter, &Vec<Expression>) -> Option<SymbolId>,
+}
+
+impl std::fmt::Debug for NativeFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<NativeFunction-{}>", self.name)
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -590,10 +590,12 @@ impl Parser {
         return match self.current_token() {
             Token::Let => {
                 let assignment = self.variable_assignment()?;
+                self.expect(Token::Semicolon, "statement")?;
                 Ok(Statement::VariableAssignmentNode(assignment))
             },
             Token::Return => {
                 let return_stmt = self.return_stmt()?;
+                self.expect(Token::Semicolon, "statement")?;
                 Ok(Statement::ReturnNode(return_stmt))        
             },
             _ => {
@@ -607,7 +609,6 @@ impl Parser {
     fn return_stmt(&mut self) -> Result<Return, ParseError> {
         self.expect(Token::Return, "statement")?;
         let value = self.expression()?;
-        self.expect(Token::Semicolon, "statement")?;
 
         Ok(Return {
             value,

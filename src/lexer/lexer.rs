@@ -180,6 +180,12 @@ impl Lexer {
                     _ => Err(LexError::Message("could not lex separator".to_string()))
                 }
             },
+            '=' => {
+                return match self.chomp() {
+                    '>' => Ok(FatArrow),
+                    _ => Err(LexError::Message("could not lex separator".to_string()))
+                }
+            },
             ':' => {
                 return match self.current_char() {
                     ':' => {

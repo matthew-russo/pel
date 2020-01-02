@@ -119,7 +119,7 @@ impl Environment {
 
     pub fn from_parent(parent: &Arc<RwLock<Environment>>) -> Self {
         Self {
-            parent: Some(parent.clone()),
+            parent: Some(Arc::clone(parent)),
             locals: HashMap::new(),
         }
     }
@@ -138,8 +138,8 @@ impl Environment {
             return Some(*sym_id);
         }
 
-        return match &self.parent {
-            Some(env) => env.read().unwrap().get_symbol_by_name(name),
+        match self.parent {
+            Some(ref p) => p.read().unwrap().get_symbol_by_name(name),
             None => None
         }
     }
@@ -157,8 +157,10 @@ pub(crate) enum Symbol {
     ObjectInstance(ObjectInstance),
     Enum(Enum),
     EnumInstance(EnumInstance),
+    SelfVariable(SymbolId),
     Function(Function),
     NativeFunction(NativeFunction),
+    FunctionInvocation(FunctionInvocation),
     ValueType(ValueType),
     Value(Value),
     TypeVariable(Option<SymbolId>),
@@ -318,7 +320,7 @@ pub(crate) struct Object {
     pub name: String,
     pub type_arguments: Vec<(String, SymbolId)>,
     pub fields: HashMap<String, SymbolId>,
-    pub methods: Vec<Function>,
+    pub methods: HashMap<String, SymbolId>,
 }
 
 impl SymHash for Object {
@@ -440,11 +442,17 @@ impl SymHash for Function {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionInvocation {
+    pub func_id: SymbolId,
+    pub args: Vec<SymbolId>,
+}
+
 #[derive(Clone)]
 pub(crate) struct NativeFunction {
     pub name: String,
     pub args: Vec<Expression>,
-    pub func: fn(&mut Interpreter, &Vec<Expression>) -> Option<SymbolId>,
+    pub func: fn(&mut Interpreter, Vec<SymbolId>) -> Option<SymbolId>,
 }
 
 impl std::fmt::Debug for NativeFunction {
@@ -476,7 +484,7 @@ impl SymHash for ValueType {
 }
 
 pub(crate) trait Callable<E: Evaluator> {
-    fn call(&self, evaluator: &mut E, args: &Vec<Expression>) -> Option<SymbolId>;
+    fn call(&self, evaluator: &mut E, args: Vec<SymbolId>) -> Option<SymbolId>;
 }
 
 // Some of these are just structural / control flow

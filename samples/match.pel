@@ -1,0 +1,31 @@
+func main() {
+  let some_string: Maybe<<string>> := Maybe<<string>>::Some("hello");
+
+  match some_string {
+    Maybe<<string>>::Some(s) => {
+      print(s);
+    },
+    Maybe<<string>>::None => {
+      print("SOME_STRING WAS NONE TYPE");
+    },
+  };
+
+  let nunya: Maybe<<string>> := Maybe<<string>>::None;
+
+  match nunya {
+    Maybe<<string>>::Some(s) => {
+      print("GOT SOME BUT ITS A NONE...");
+    },
+    Maybe<<string>>::None => {
+      print("NUNYA WAS NONE. THIS IS CORRECT");
+    },
+  };
+}
+
+enum Maybe<<T>> {
+  variants {
+    Some(T),
+    None,
+  }
+}
+

@@ -228,11 +228,6 @@ impl Parser {
             _ => Vec::new(),
         };
 
-        let functions = match self.tokens[self.current] {
-            Token::Functions => self.functions()?,
-            _ => Vec::new(),
-        };
-
         self.expect(Token::CloseCurlyBracket, "enum_declaration")?;
 
         Ok(EnumDeclaration {
@@ -240,7 +235,6 @@ impl Parser {
             type_params,
             variants,
             methods,
-            functions,
         })
     }
 
@@ -265,11 +259,6 @@ impl Parser {
             _ => Vec::new(),
         };
 
-        let functions = match self.tokens[self.current] {
-            Token::Functions => self.functions()?,
-            _ => Vec::new(),
-        };
-        
         self.expect(Token::CloseCurlyBracket, "object_declaration")?;
 
         Ok(ObjectDeclaration {
@@ -277,7 +266,6 @@ impl Parser {
             type_params,
             fields,
             methods,
-            functions,
         })
     }
 
@@ -887,7 +875,7 @@ impl Parser {
                 Ok(ExpressionStart::ValueNode(Value::FloatValue(f)))
             },
             t => {
-                let message = format!("unable to parse expression_start at {}", t);
+                let message = format!("unable to parse expression_start at {}, pos: {}", t, self.current);
                 Err(ParseError::Message(message))
             }
         }
@@ -1049,9 +1037,31 @@ impl Parser {
         })
     }
 
-    fn patterns(&mut self) -> Result<Patterns, ParseError> {
-        // TODO -> Fix this hole
-        Ok(Patterns{}) 
+    fn patterns(&mut self) -> Result<Vec<Pattern>, ParseError> {
+        let mut patterns = Vec::new();
+
+        loop {
+            match self.pattern() {
+                Ok(pattern) => patterns.push(pattern),
+                Err(_) => break,
+            }
+        }
+
+        Ok(patterns) 
+    }
+
+    fn pattern(&mut self) -> Result<Pattern, ParseError> {
+        let expr = self.expression()?;
+        self.expect(Token::FatArrow, "pattern")?;
+        self.expect(Token::OpenCurlyBracket, "pattern")?;
+        let body = self.block_body()?;
+        self.expect(Token::CloseCurlyBracket, "pattern")?;
+        self.expect(Token::Comma, "pattern")?;
+
+        Ok(Pattern {
+            to_match: expr,
+            body,
+        })
     }
 
     fn loop_expr(&mut self) -> Result<Loop, ParseError> {

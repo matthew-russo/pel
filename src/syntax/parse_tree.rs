@@ -20,7 +20,6 @@ pub(crate) struct EnumDeclaration {
     pub type_params: Vec<String>,
     pub variants: Vec<VariantDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
-    pub functions: Vec<FunctionDeclaration>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,7 +28,6 @@ pub(crate) struct ObjectDeclaration {
     pub type_params: Vec<String>,
     pub fields: Vec<TypedVariableDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
-    pub functions: Vec<FunctionDeclaration>,
 }
 
 #[derive(Debug, Clone)]
@@ -314,11 +312,14 @@ pub(crate) struct If {
 #[derive(Debug, Clone)]
 pub(crate) struct Match {
     pub expr: Expression,
-    pub patterns: Patterns,
+    pub patterns: Vec<Pattern>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Patterns {}
+pub(crate) struct Pattern {
+    pub to_match: Expression,
+    pub body: BlockBody,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct Loop {

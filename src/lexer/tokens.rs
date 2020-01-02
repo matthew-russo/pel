@@ -31,6 +31,7 @@ pub(crate) enum Token {
     CloseDoubleAngleBracket,
     Pipe,
     Arrow,
+    FatArrow,
     Colon,
     DoubleColon,
     Semicolon,
@@ -107,6 +108,7 @@ impl Display for Token {
             CloseDoubleAngleBracket => "CloseDoubleAngleBracket".to_string(),
             Pipe                    => "Pipe".to_string(),
             Arrow                   => "Arrow".to_string(),
+            FatArrow                => "FatArrow".to_string(),
             Colon                   => "Colon".to_string(),
             DoubleColon             => "DoubleColon".to_string(),
             Semicolon               => "Semicolon".to_string(),
@@ -135,7 +137,7 @@ impl Display for Token {
             SelfVariable       => "SelfVariable".to_string(),
             Public             => "Public".to_string(),
             Return             => "Return".to_string(),
-            Let             => "let".to_string(),
+            Let                => "let".to_string(),
 
             // literals
             BooleanLit(b)      => format!("BooleanLit({})", b),
@@ -184,7 +186,7 @@ pub(crate) const SELF_TYPE    : &str = "Self";
 pub(crate) const SELF_VAR     : &str = "self";
 pub(crate) const PUBLIC       : &str = "public";
 pub(crate) const RETURN       : &str = "return";
-pub(crate) const LET       : &str = "let";
+pub(crate) const LET          : &str = "let";
 pub(crate) const TRUE         : &str = "true";
 pub(crate) const FALSE        : &str = "false";
 

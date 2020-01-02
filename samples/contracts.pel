@@ -1,0 +1,27 @@
+func main() {
+  let greeter: Greeter := EnglishGreeter {};
+  print(greeter.greet("matthew"));
+  print(greeter.goodbye());
+}
+
+contract Greeter {
+  greet(name: string) -> String;
+}
+
+object EnglishGreeter {
+  fields {
+
+  }
+
+  methods {
+    goodbye(self) ->  string {
+      return "goodbye"
+    }
+  }
+}
+
+implement Greeter for EnglishGreeter {
+  greet(name: string) -> String {
+    return "hello " + name;
+  }
+}

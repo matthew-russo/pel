@@ -33,7 +33,7 @@ fn print_nat_fn() -> NativeFunction {
     NativeFunction {
         name: "print".into(),
         args: Vec::new(),
-        func: |interp: &mut Interpreter, args: &Vec<Expression>| {
+        func: |interp: &mut Interpreter, args: Vec<SymbolId>| {
             if args.len() != 1 {
                 let message = format!(
                     "invalid number of parameters function call. expected 1, got {}",
@@ -42,12 +42,8 @@ fn print_nat_fn() -> NativeFunction {
                 panic!(message);
             }
 
-            let result_sym_id = {
-                interp.visit_expression(args.iter().nth(0).unwrap());
-                interp.last_local.take().unwrap()
-            };
-
-            let result = interp.symbol_table.load_symbol(result_sym_id);
+            let result_sym_id = args.iter().nth(0).unwrap();
+            let result = interp.symbol_table.load_symbol(*result_sym_id);
 
             let readable_result = result.read().unwrap();
             match readable_result.deref() {

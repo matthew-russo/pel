@@ -1,0 +1,30 @@
+func main() {
+  let u: User := User {
+    name: "Matthew",
+    age: 25,
+  };
+
+  print(u.get_name());
+  print(to_string(u.get_age()));
+}
+
+object User {
+  fields {
+    name: string,
+    age: int,
+  }
+
+  methods {
+    func get_name(self) -> string {
+      return self.name;
+    }
+
+    func get_age(self) -> int {
+      return self.age;
+    }
+  }
+}
+
+func to_string(i: int) -> string {
+  return "25";
+}

@@ -9,13 +9,14 @@ use crate::evaluator::evaluator::{
     Environment,
     Evaluator,
     Function,
+    FunctionInvocation,
     NativeFunction,
     Object,
     ObjectInstance,
     Symbol,
     SymbolId,
     SymbolTable,
-    SymHash
+    SymHash,
 };
 use crate::syntax::parse_tree::*;
 
@@ -197,10 +198,9 @@ impl Evaluator for Interpreter {
 
                     (vd.name.clone(), Symbol::EnumInstance(initialized_enum))
                 } else {
-                    let enum_constructor = |interp: &mut Interpreter, args: &Vec<Expression>| {
-                        interp.visit_expression(args.iter().nth(0).unwrap());
-                        let ty_sym_id = interp.last_local.take().unwrap();
-                        let ty_sym = interp.symbol_table.load_symbol(ty_sym_id);
+                    let enum_constructor = |interp: &mut Interpreter, args: Vec<SymbolId>| {
+                        let ty_sym_id = args.iter().nth(0).unwrap();
+                        let ty_sym = interp.symbol_table.load_symbol(*ty_sym_id);
                         let ty_sym_readable = ty_sym.read().unwrap();
                         let ty = match ty_sym_readable.deref() {
                             Symbol::Value(Value::IntegerValue(i)) => *i as u32,
@@ -211,9 +211,8 @@ impl Evaluator for Interpreter {
                             },
                         };
 
-                        interp.visit_expression(args.iter().nth(1).unwrap());
-                        let name_sym_id = interp.last_local.take().unwrap();
-                        let name_sym = interp.symbol_table.load_symbol(name_sym_id);
+                        let name_sym_id = args.iter().nth(1).unwrap();
+                        let name_sym = interp.symbol_table.load_symbol(*name_sym_id);
                         let name_sym_readable = name_sym.read().unwrap();
                         let name = match name_sym_readable.deref() {
                             Symbol::Value(Value::StringValue(s)) => s.clone(),
@@ -224,9 +223,8 @@ impl Evaluator for Interpreter {
                             },
                         };
 
-                        interp.visit_expression(args.iter().nth(2).unwrap());
-                        let does_contain_type_sym_id = interp.last_local.take().unwrap();
-                        let does_contain_type_sym = interp.symbol_table.load_symbol(does_contain_type_sym_id);
+                        let does_contain_type_sym_id = args.iter().nth(2).unwrap();
+                        let does_contain_type_sym = interp.symbol_table.load_symbol(*does_contain_type_sym_id);
                         let does_contain_type_sym_readable = does_contain_type_sym.read().unwrap();
                         let does_contain_type = match does_contain_type_sym_readable.deref() {
                             Symbol::Value(Value::BooleanValue(b)) => *b,
@@ -238,9 +236,8 @@ impl Evaluator for Interpreter {
                         };
 
                         let contains = if does_contain_type {
-                            interp.visit_expression(args.iter().nth(3).unwrap());
-                            let contains_type_id_sym_id = interp.last_local.take().unwrap();
-                            let contains_type_id_sym = interp.symbol_table.load_symbol(contains_type_id_sym_id);
+                            let contains_type_id_sym_id = args.iter().nth(3).unwrap();
+                            let contains_type_id_sym = interp.symbol_table.load_symbol(*contains_type_id_sym_id);
                             let contains_type_id_sym_readable = contains_type_id_sym.read().unwrap();
                             let contains_type_id = match contains_type_id_sym_readable.deref() {
                                 Symbol::Value(Value::IntegerValue(i)) => *i as u32 as SymbolId,
@@ -251,9 +248,8 @@ impl Evaluator for Interpreter {
                                 },
                             };
 
-                            interp.visit_expression(args.iter().nth(4).unwrap());
-                            let contains_sym_id = interp.last_local.take().unwrap();
-                            let contains_sym = interp.symbol_table.load_symbol(contains_sym_id);
+                            let contains_sym_id = args.iter().nth(4).unwrap();
+                            let contains_sym = interp.symbol_table.load_symbol(*contains_sym_id);
                             let contains_sym_readable = contains_sym.read().unwrap();
                             if contains_type_id != contains_sym_readable.get_type() {
                                 let supposed_to_contain = interp.symbol_table.load_symbol(contains_type_id);
@@ -268,7 +264,7 @@ impl Evaluator for Interpreter {
                                 panic!(message);
                             }
                             
-                            Some(contains_sym_id)
+                            Some(*contains_sym_id)
                         } else {
                             None
                         };
@@ -322,7 +318,6 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-
         self.current_env = Arc::new(RwLock::new(local_env));
 
         let fields = obj_decl
@@ -341,7 +336,7 @@ impl Evaluator for Interpreter {
             name: obj_decl.type_name.clone(),
             type_arguments,
             fields,
-            methods: Vec::new(),
+            methods: HashMap::new(),
         };
 
         let sym_id = self.symbol_table.gen_id();
@@ -349,7 +344,11 @@ impl Evaluator for Interpreter {
         obj.methods = obj_decl
             .methods
             .iter()
-            .map(|fd| Function::from_function_decl_syntax(sym_id.clone(), fd, &self.global_env))
+            .map(|fd| {
+                let func = Function::from_function_decl_syntax(sym_id.clone(), fd, &self.global_env);
+                let id = self.symbol_table.new_symbol(Symbol::Function(func));
+                (fd.signature.name.clone(), id)
+            })
             .collect();
 
         let obj_sym = Symbol::Object(obj);
@@ -472,10 +471,6 @@ impl Evaluator for Interpreter {
             let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
             let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
 
-            println!("SYMBOL_TABLE: {:?}", self.symbol_table);
-            println!("TARGET: {:?}", target_type_sym);
-            println!("VALUE: {:?}", value_type_sym);
-
             panic!("expected a value of type: {}, but got {}",
                    target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
                    value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
@@ -515,8 +510,13 @@ impl Evaluator for Interpreter {
                 };
 
                 self.last_local = match self.current_env.read().unwrap().get_symbol_by_name(&name) {
-                    Some(sym) => Some(sym.clone()),
-                    None => panic!(format!("unknown symbol {:?}", name)),
+                    Some(sym) => {
+                        Some(sym.clone())
+                    },
+                    None => {
+                        let message = format!("unknown symbol {:?}", name);
+                        panic!(message);
+                    },
                 }
             }
             ValueNode(ref value) => {
@@ -538,6 +538,7 @@ impl Evaluator for Interpreter {
                 BinaryOperationNode(bin_op) => self.visit_binary_operation(bin_op),
             };
         }
+
     }
 
     fn visit_conditional(&mut self, conditional: &Conditional) {
@@ -565,8 +566,19 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_match(&mut self, _match_node: &Match) {
-        panic!("unimplemented visit_match");
+    fn visit_match(&mut self, match_node: &Match) {
+        self.visit_expression(&match_node.expr);
+        let target_sym_id = self.last_local.take().unwrap();
+        let target_sym = self.symbol_table.load_symbol(target_sym_id);
+        let target_sym_readable = target_sym.read().unwrap();
+
+        for pattern in match_node.patterns.iter() {
+            self.visit_expression(&pattern.to_match);
+            let to_match_sym_id = self.last_local.take().unwrap();
+            let to_match_sym = self.symbol_table.load_symbol(to_match_sym_id);
+
+            
+        }
     }
 
     fn visit_loop(&mut self, loop_node: &Loop) {
@@ -604,17 +616,81 @@ impl Evaluator for Interpreter {
         let to_access = self.symbol_table.load_symbol(to_access_sym_id);
 
         let readable_to_access = to_access.read().unwrap();
-        if let Symbol::ObjectInstance(obj) = readable_to_access.deref() {
-            if obj.field_values.contains_key(&field_access.field_name) {
-                let sym_id = obj.field_values.get(&field_access.field_name).unwrap();
-                self.last_local = Some(*sym_id);
-            } else {
-                let message = format!("unknown field {} of object.", field_access.field_name);
+        match readable_to_access.deref() {
+            Symbol::SelfVariable(sym_id) => {
+                // self variables can access fields and call methods
+                let oi_sym = self.symbol_table.load_symbol(*sym_id);
+                let oi_sym_readable = oi_sym.read().unwrap();
+                if let Symbol::ObjectInstance(oi) = oi_sym_readable.deref() {
+                    match oi.field_values.get(&field_access.field_name) {
+                        Some(v) => {
+                            self.last_local = Some(*v);
+                            return;
+                        },
+                        None => (),
+                    }
+
+                    let obj = self.symbol_table.load_symbol(oi.ty);
+                    let obj_readable = obj.read().unwrap();
+                    if let Symbol::Object(o) = obj_readable.deref() {
+                        match o.methods.get(&field_access.field_name) {
+                            Some(func_id) => {
+                                let self_sym = Symbol::SelfVariable(to_access_sym_id);
+                                let self_sym_id = self.symbol_table.new_symbol(self_sym);
+                                let func_invoc = FunctionInvocation {
+                                    func_id: *func_id,
+                                    args: vec![self_sym_id],
+                                };
+                                let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
+                                self.last_local = Some(sym_id);
+                                return;
+                            },
+                            None => (),
+                        }
+                    }
+
+                    panic!("self variable of type: {} does not have field or method with name: {}",
+                           obj_readable.sym_hash(&self.symbol_table).unwrap(),
+                           field_access.field_name);
+                } else {
+                    // TODO -> we also need Enums
+                    panic!("expected self variable to point to an ObjectInstance but got {}",
+                           oi_sym_readable.sym_hash(&self.symbol_table).unwrap());
+                }
+            },
+            Symbol::ObjectInstance(oi) => {
+                // only methods can be called on object instances that aren't self
+                let obj_sym = self.symbol_table.load_symbol(oi.ty);
+                let obj_sym_readable = obj_sym.read().unwrap();
+                let obj = match obj_sym_readable.deref() {
+                    Symbol::Object(o) => o,
+                    s => panic!("COMPILER BUG: parent of ObjectInstance must be an object but got {}", s.sym_hash(&self.symbol_table).unwrap()),
+                };
+
+                match obj.methods.get(&field_access.field_name) {
+                    Some(func_id) => {
+                        let self_sym = Symbol::SelfVariable(to_access_sym_id);
+                        let self_sym_id = self.symbol_table.new_symbol(self_sym);
+                        let func_invoc = FunctionInvocation {
+                            func_id: *func_id,
+                            args: vec![self_sym_id],
+                        };
+                        let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
+                        self.last_local = Some(sym_id);
+                    },
+                    None => {
+                        let message = format!("unknown field '{}' of object.", field_access.field_name);
+                        panic!(message);
+                    }
+                }
+            },
+            // Symbol::DataInstance {
+            //     field access
+            // },
+            _ => {
+                let message = format!("trying to use object initialization syntax on something that isn't an object: {:?}", to_access);
                 panic!(message);
             }
-        } else {
-            let message = format!("trying to use object initialization syntax on something that isn't an object: {:?}", to_access);
-            panic!(message);
         }
     }
 
@@ -782,36 +858,83 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_function_application(&mut self, func_app: &FunctionApplication) {
+
         let last_local_sym_id = self.last_local.take().unwrap();
         let last_local = self.symbol_table.load_symbol(last_local_sym_id);
-
+        
         // TODO -> Clean this up. duplicated code but dont have a nice abstraction
         let last_local_readable = last_local.read().unwrap();
         match last_local_readable.deref() {
             Symbol::Function(func) => {
-                let result_sym_id = func.call(self, &func_app.args);
+                let args = func_app.args
+                    .iter()
+                    .map(|expr| {
+                        self.visit_expression(expr);
+                        self.last_local.take().unwrap()
+                    })
+                    .collect();
+
+                let result_sym_id = func.call(self, args);
 
                 if let Some(ref _ret_type) = func.returns {
                     // TODO -> type check return value
                     self.last_local = Some(result_sym_id.unwrap());
                 }
-            }
+            },
             Symbol::NativeFunction(native_func) => {
                 let all_args = vec![
-                    native_func.args.clone(),
-                    func_app.args.clone()
-                ].concat();
-                let result_sym_id = native_func.call(self, &all_args);
+                        native_func.args.clone(),
+                        func_app.args.clone()]
+                    .concat()
+                    .iter()
+                    .map(|expr| {
+                        self.visit_expression(expr);
+                        self.last_local.take().unwrap()
+                    })
+                    .collect();
+
+                let result_sym_id = native_func.call(self, all_args);
 
                 if let Some(sym_id) = result_sym_id {
                     // TODO -> type check return value
                     self.last_local = Some(sym_id);
                 }
+            },
+            Symbol::FunctionInvocation(fi) => {
+                let new_args = func_app.args
+                    .iter()
+                    .map(|expr| {
+                        self.visit_expression(expr);
+                        self.last_local.take().unwrap()
+                    })
+                    .collect();
+
+                let actual_args = [
+                    fi.args.clone(),
+                    new_args,
+                ].concat();
+
+                let func_sym = self.symbol_table.load_symbol(fi.func_id);
+                let func_sym_readable = func_sym.read().unwrap();
+                match func_sym_readable.deref() {
+                    Symbol::Function(func) => {
+                        let result_sym_id = func.call(self, actual_args);
+                        if let Some(ref _ret_type) = func.returns {
+                            // TODO -> type check return value
+                            self.last_local = Some(result_sym_id.unwrap());
+                        }
+                    },
+                    s => {
+                        let message = format!("COMPILER BUG: function invocation not pointing to a function, pointing to: {}",
+                                              s.sym_hash(&self.symbol_table).unwrap());
+                        panic!(message);
+                    },
+                }
             }
             sym => {
                 panic!("attempting to apply arguments to {} which isn't a function",
                           sym.sym_hash(&self.symbol_table).unwrap());
-            }
+            },
         }
     }
 
@@ -1009,21 +1132,21 @@ impl Evaluator for Interpreter {
 }
 
 impl Callable<Interpreter> for Object {
-    fn call(&self, _interpreter: &mut Interpreter, _args: &Vec<Expression>) -> Option<SymbolId> {
+    fn call(&self, _interpreter: &mut Interpreter, _args: Vec<SymbolId>) -> Option<SymbolId> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Enum {
-    fn call(&self, _interpreter: &mut Interpreter, _args: &Vec<Expression>) -> Option<SymbolId> {
+    fn call(&self, _interpreter: &mut Interpreter, _args: Vec<SymbolId>) -> Option<SymbolId> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Function {
-    fn call(&self, interpreter: &mut Interpreter, args: &Vec<Expression>) -> Option<SymbolId> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<SymbolId>) -> Option<SymbolId> {
         // TODO -> check visibility
-
+        
         if self.parameters.len() != args.len() {
             let message = format!(
                 "invalid number of parameters in function application. expected {}, got {}",
@@ -1035,16 +1158,8 @@ impl Callable<Interpreter> for Function {
 
         // TODO -> type check parameters
 
-        let evaluated_args: Vec<SymbolId> = args
-            .iter()
-            .map(|e| {
-                interpreter.visit_expression(e);
-                interpreter.last_local.take().unwrap()
-            })
-            .collect();
-
         let mut func_app_local_env = Environment::from_parent(&self.environment);
-        for (param, arg) in self.parameters.iter().zip(evaluated_args.into_iter()) {
+        for (param, arg) in self.parameters.iter().zip(args.into_iter()) {
             let name = match param {
                 FunctionParameter::SelfParam => String::from(SELF_VAR_SYMBOL_NAME),
                 FunctionParameter::TypedVariableDeclarationParam(typed_var) => {
@@ -1055,8 +1170,10 @@ impl Callable<Interpreter> for Function {
             func_app_local_env.define(name, arg);
         }
 
+        let current_env = Arc::clone(&interpreter.current_env);
         interpreter.set_current_env(func_app_local_env);
         interpreter.visit_block_body(&self.body);
+        interpreter.current_env = current_env;
 
         if let Some(_type_sym) = &self.returns {
             // TODO -> type check return based on the expected `type_sym`
@@ -1068,7 +1185,8 @@ impl Callable<Interpreter> for Function {
 }
 
 impl Callable<Interpreter> for NativeFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: &Vec<Expression>) -> Option<SymbolId> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<SymbolId>) -> Option<SymbolId> {
         (self.func)(interpreter, args)
     }
 }
+

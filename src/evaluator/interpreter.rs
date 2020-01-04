@@ -4,12 +4,14 @@ use std::sync::{Arc, RwLock};
 
 use crate::evaluator::evaluator::{
     Callable,
+    Contract,
     Enum,
     EnumInstance,
     Environment,
     Evaluator,
     Function,
     FunctionInvocation,
+    FunctionSignature,
     NativeFunction,
     Object,
     ObjectInstance,
@@ -182,7 +184,7 @@ impl Evaluator for Interpreter {
             type_arguments,
             variants,
             variant_funcs: HashMap::new(),
-            methods: Vec::new(),
+            methods: HashMap::new(),
         };
 
         let enu_sym_id = self.symbol_table.gen_id();
@@ -291,7 +293,11 @@ impl Evaluator for Interpreter {
         enu.methods = enum_decl
             .methods
             .iter()
-            .map(|fd| Function::from_function_decl_syntax(enu_sym_id.clone(), fd, &self.global_env))
+            .map(|fd| {
+                self.visit_function_declaration(fd);
+                let method_id = self.last_local.take().unwrap();
+                (fd.signature.name.clone(), method_id)
+            })
             .collect();
 
         let enu_sym = Symbol::Enum(enu);
@@ -345,9 +351,10 @@ impl Evaluator for Interpreter {
             .methods
             .iter()
             .map(|fd| {
-                let func = Function::from_function_decl_syntax(sym_id.clone(), fd, &self.global_env);
-                let id = self.symbol_table.new_symbol(Symbol::Function(func));
-                (fd.signature.name.clone(), id)
+                self.last_local = Some(sym_id);
+                self.visit_function_declaration(fd);
+                let method_id = self.last_local.take().unwrap();
+                (fd.signature.name.clone(), method_id)
             })
             .collect();
 
@@ -364,9 +371,35 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_contract_declaration(&mut self, contract_decl: &ContractDeclaration) {
+        let mut local_env = Environment::from_parent(&self.current_env);
+
+        let type_arguments = contract_decl.type_params
+            .iter()
+            .map(|type_param_name| {
+                let sym_hole_id = self.symbol_table.new_symbol(Symbol::TypeVariable(None));
+                local_env.define(type_param_name.clone(), sym_hole_id);
+                (type_param_name.clone(), sym_hole_id)
+            })
+            .collect();
+
+        self.current_env = Arc::new(RwLock::new(local_env));
+
+        let required_functions = contract_decl.functions
+            .iter()
+            .map(|fs| {
+                self.visit_function_signature(&fs);
+                self.last_local.take().unwrap()
+            })
+            .collect();
+
+        let contract = Contract {
+            parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
+            name: contract_decl.type_name.clone(),
+            type_arguments,
+            required_functions,
+        };
+
         panic!("unimplemented visit_contract_declaration");
-        // let contract_sym = Contract::from(contract_decl);
-        // self.current_env.define(contract_decl.type_name, contract_sym);
     }
 
     fn visit_implementation_declaration(&mut self, impl_decl: &ImplementationDeclaration) {
@@ -395,18 +428,66 @@ impl Evaluator for Interpreter {
             return;
         }
 
-        let func_sym = Symbol::Function(Function::from_function_decl_syntax(
+        self.visit_function_signature(&func_decl.signature);
+        let func_sig_id = self.last_local.take().unwrap();
+
+        let func = Function {
             // TODO -> remove this and pass module context in
-            SymbolTable::MAIN_MODULE_SYMBOL_ID,
-            func_decl,
-            &self.current_env,
-        ));
+            parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
+            signature: func_sig_id,
+            body: func_decl.body.clone(),
+            environment: self.current_env.clone(),
+        };
+
+        let func_sym = Symbol::Function(func);
 
         let symbol_id = self.symbol_table.new_symbol(func_sym);
         self.current_env
             .write()
             .unwrap()
             .define(name.clone(), symbol_id);
+        self.last_local = Some(symbol_id);
+    }
+
+    fn visit_function_signature(&mut self, func_sig: &crate::syntax::parse_tree::FunctionSignature) {
+        let type_params = func_sig.type_parameters
+            .iter()
+            .map(|t| (t.clone(), SymbolTable::EMPTY_TYPE_VARIABLE_SYMBOL_ID))
+            .collect();
+
+        let mut parameters = Vec::new();
+        for param in func_sig.parameters.iter() {
+            let p = match param {
+                FunctionParameter::SelfParam => {
+                    let current_sym_id = self.last_local.take().unwrap();
+                    (SELF_VAR_SYMBOL_NAME.into(), current_sym_id)
+                },
+                FunctionParameter::TypedVariableDeclarationParam(tvd) => {
+                    self.visit_expression(&tvd.type_reference);
+                    (tvd.name.clone(), self.last_local.take().unwrap())
+                }
+            };
+
+            parameters.push(p);
+        }
+
+        let returns = match func_sig.returns {
+            Some(ref expr) => {
+                self.visit_expression(&expr);
+                Some(self.last_local.take().unwrap())
+            },
+            None => None,
+        };
+
+        let func_sig = FunctionSignature {
+            name: func_sig.name.clone(),
+            type_parameters: type_params,
+            parameters,
+            returns,
+        };
+
+        let func_sig_id = self.symbol_table.get_or_create_symbol(Symbol::FunctionSignature(func_sig));
+        self.last_local = Some(func_sig_id);
     }
 
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &TypedVariableDeclaration) {
@@ -567,6 +648,7 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_match(&mut self, match_node: &Match) {
+        panic!("unimplemented visit_match");
         self.visit_expression(&match_node.expr);
         let target_sym_id = self.last_local.take().unwrap();
         let target_sym = self.symbol_table.load_symbol(target_sym_id);
@@ -876,7 +958,16 @@ impl Evaluator for Interpreter {
 
                 let result_sym_id = func.call(self, args);
 
-                if let Some(ref _ret_type) = func.returns {
+                let signature_sym = self.symbol_table.load_symbol(func.signature);
+                let signature_sym_readable = signature_sym.read().unwrap();
+                let signature = if let Symbol::FunctionSignature(sig) = signature_sym_readable.deref() {
+                    sig
+                } else {
+                    let message = format!("COMPILER ERROR: expected FunctionSignature but got {}", signature_sym_readable.sym_hash(&self.symbol_table).unwrap());
+                    panic!(message);
+                };
+
+                if let Some(ref _ret_type) = signature.returns {
                     // TODO -> type check return value
                     self.last_local = Some(result_sym_id.unwrap());
                 }
@@ -918,8 +1009,17 @@ impl Evaluator for Interpreter {
                 let func_sym_readable = func_sym.read().unwrap();
                 match func_sym_readable.deref() {
                     Symbol::Function(func) => {
+                        let signature_sym = self.symbol_table.load_symbol(func.signature);
+                        let signature_sym_readable = signature_sym.read().unwrap();
+                        let signature = if let Symbol::FunctionSignature(sig) = signature_sym_readable.deref() {
+                            sig
+                        } else {
+                            let message = format!("COMPILER ERROR: expected FunctionSignature but got {}", signature_sym_readable.sym_hash(&self.symbol_table).unwrap());
+                            panic!(message);
+                        };
+
                         let result_sym_id = func.call(self, actual_args);
-                        if let Some(ref _ret_type) = func.returns {
+                        if let Some(ref _ret_type) = signature.returns {
                             // TODO -> type check return value
                             self.last_local = Some(result_sym_id.unwrap());
                         }
@@ -1145,37 +1245,40 @@ impl Callable<Interpreter> for Enum {
 
 impl Callable<Interpreter> for Function {
     fn call(&self, interpreter: &mut Interpreter, args: Vec<SymbolId>) -> Option<SymbolId> {
-        // TODO -> check visibility
+        let signature_sym = interpreter.symbol_table.load_symbol(self.signature);
+        let signature_sym_readable = signature_sym.read().unwrap();
+        let signature = if let Symbol::FunctionSignature(sig) = signature_sym_readable.deref() {
+            sig
+        } else {
+            let message = format!("COMPILER ERROR: expected FunctionSignature but got {}", signature_sym_readable.sym_hash(&interpreter.symbol_table).unwrap());
+            panic!(message);
+        };
         
-        if self.parameters.len() != args.len() {
+        if signature.parameters.len() != args.len() {
             let message = format!(
                 "invalid number of parameters in function application. expected {}, got {}",
-                self.parameters.len(),
+                signature.parameters.len(),
                 args.len()
             );
             panic!(message);
         }
 
-        // TODO -> type check parameters
-
         let mut func_app_local_env = Environment::from_parent(&self.environment);
-        for (param, arg) in self.parameters.iter().zip(args.into_iter()) {
-            let name = match param {
-                FunctionParameter::SelfParam => String::from(SELF_VAR_SYMBOL_NAME),
-                FunctionParameter::TypedVariableDeclarationParam(typed_var) => {
-                    typed_var.name.clone()
-                }
-            };
+        for ((n, param_id), arg_id) in signature.parameters.iter().zip(args.into_iter()) {
+            let param_sym = interpreter.symbol_table.load_symbol(*param_id);
+            let param_sym_readable = param_sym.read().unwrap();
 
-            func_app_local_env.define(name, arg);
+            // TODO -> type check load_sym(arg_id).get_type against param_sym
+
+            func_app_local_env.define(n.clone(), arg_id);
         }
 
         let current_env = Arc::clone(&interpreter.current_env);
         interpreter.set_current_env(func_app_local_env);
         interpreter.visit_block_body(&self.body);
         interpreter.current_env = current_env;
-
-        if let Some(_type_sym) = &self.returns {
+        
+        if let Some(_type_sym) = &signature.returns {
             // TODO -> type check return based on the expected `type_sym`
             Some(interpreter.last_local.take().unwrap())
         } else {

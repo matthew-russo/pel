@@ -65,8 +65,8 @@ pub(crate) enum Visibility {
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionSignature {
     pub name: String,
-    pub type_params: Vec<String>,
-    pub params: Vec<FunctionParameter>,
+    pub type_parameters: Vec<String>,
+    pub parameters: Vec<FunctionParameter>,
     pub returns: Option<Expression>
 }
 

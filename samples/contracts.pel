@@ -5,7 +5,7 @@ func main() {
 }
 
 contract Greeter {
-  greet(name: string) -> String;
+  func greet(name: string) -> string;
 }
 
 object EnglishGreeter {
@@ -14,14 +14,14 @@ object EnglishGreeter {
   }
 
   methods {
-    goodbye(self) ->  string {
-      return "goodbye"
+    func goodbye(self) -> string {
+      return "goodbye";
     }
   }
 }
 
 implement Greeter for EnglishGreeter {
-  greet(name: string) -> String {
+  func greet(name: string) -> string {
     return "hello " + name;
   }
 }

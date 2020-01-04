@@ -158,6 +158,7 @@ pub(crate) enum Symbol {
     Enum(Enum),
     EnumInstance(EnumInstance),
     SelfVariable(SymbolId),
+    FunctionSignature(FunctionSignature),
     Function(Function),
     NativeFunction(NativeFunction),
     FunctionInvocation(FunctionInvocation),
@@ -288,15 +289,16 @@ impl SymHash for Module {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Contract {
-    pub module: Arc<RwLock<Module>>,
+    pub parent: SymbolId,
     pub name: String,
     pub type_arguments: Vec<(String, SymbolId)>,
-    pub required_functions: Vec<FunctionSignature>,
+    pub required_functions: Vec<SymbolId>,
 }
 
 impl SymHash for Contract {
     fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        let hash = self.module.read().unwrap().sym_hash(table).unwrap();
+        let parent = table.load_symbol(self.parent);
+        let hash = parent.read().unwrap().sym_hash(table).unwrap();
 
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_sym_hash = self.type_arguments
@@ -366,7 +368,7 @@ pub(crate) struct Enum {
     pub type_arguments: Vec<(String, SymbolId)>,
     pub variants: HashMap<String, Option<SymbolId>>,
     pub variant_funcs: HashMap<String, Symbol>,
-    pub methods: Vec<Function>,
+    pub methods: HashMap<String, SymbolId>,
 }
 
 impl SymHash for Enum {
@@ -397,48 +399,84 @@ pub(crate) struct EnumInstance {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Function {
-    pub parent: SymbolId,
+pub(crate) struct FunctionSignature {
     pub name: String,
     pub type_parameters: Vec<(String, SymbolId)>,
-    pub parameters: Vec<FunctionParameter>,
-    pub returns: Option<Expression>,
-    pub body: BlockBody,
-    pub environment: Arc<RwLock<Environment>>,
+    pub parameters: Vec<(String, SymbolId)>,
+    pub returns: Option<SymbolId>,
 }
 
-impl Function {
-    // TODO -> eerily similar to Interpreter::visit_object_declaration
-    pub fn from_function_decl_syntax(parent: SymbolId, func_decl: &FunctionDeclaration, current_env: &Arc<RwLock<Environment>>) -> Self {
-        let type_params = func_decl.signature.type_params
-            .iter()
-            .map(|t| (t.clone(), SymbolTable::EMPTY_TYPE_VARIABLE_SYMBOL_ID))
-            .collect();
+impl SymHash for FunctionSignature {
+    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
+        let type_params = if !self.type_parameters.is_empty() {
+            let tp_str = self.type_parameters
+                .iter()
+                .map(|(n, id)| {
+                    let sym = table.load_symbol(*id);
+                    let sym_readable = sym.read().unwrap();
+                    sym_readable.sym_hash(table).unwrap()
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
 
-        Self {
-            parent,
-            name: func_decl.signature.name.clone(),
-            type_parameters: type_params,
-            parameters: func_decl.signature.params.clone(),
-            returns: func_decl.signature.returns.clone(),
-            body: func_decl.body.clone(),
-            environment: current_env.clone(),
-        }
+            format!("<{}>", tp_str)
+        } else {
+            String::new()
+        };
+
+        let params = if !self.parameters.is_empty() {
+            self.parameters
+                .iter()
+                .map(|(n, id)| {
+                    let sym = table.load_symbol(*id);
+                    let sym_readable = sym.read().unwrap();
+                    sym_readable.sym_hash(table).unwrap()
+                })
+                .collect::<Vec<String>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
+
+        let returns = match self.returns {
+            Some(id) => {
+                let return_sym = table.load_symbol(id);
+                let return_sym_readable = return_sym.read().unwrap();
+                let hash = return_sym_readable.sym_hash(table).unwrap();
+
+                format!(" -> {}", hash)
+            },
+            None => String::new(),
+        };
+        
+        let hash = format!("func{}({}){}", type_params, params, returns);
+        Some(hash)
     }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Function {
+    pub parent: SymbolId,
+    pub signature: SymbolId,
+    pub body: BlockBody,
+    pub environment: Arc<RwLock<Environment>>,
 }
 
 impl SymHash for Function {
     fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
         let parent = table.load_symbol(self.parent);
 
-        let hash = match parent.read().unwrap().deref() {
+        let parent_hash = match parent.read().unwrap().deref() {
             Symbol::Module(ref m) => m.sym_hash(table).unwrap(),
             Symbol::Object(ref o) => o.sym_hash(table).unwrap(),
             Symbol::Enum(ref e)   => e.sym_hash(table).unwrap(),
             _ => unreachable!(),
         };
 
-        Some([hash, self.name.clone()].join("::"))
+        let signature = table.load_symbol(self.signature);
+        let sig_hash = signature.read().unwrap().sym_hash(table).unwrap();
+
+        Some([parent_hash, sig_hash].join("::"))
     }
 }
 
@@ -499,6 +537,7 @@ pub(crate) trait Evaluator {
     fn visit_implementation_declaration(&mut self, impl_decl: &ImplementationDeclaration);
     fn visit_variant_declaration(&mut self, variant_decl: &VariantDeclaration);
     fn visit_function_declaration(&mut self, function_decl: &FunctionDeclaration);
+    fn visit_function_signature(&mut self, function_decl: &crate::syntax::parse_tree::FunctionSignature);
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &TypedVariableDeclaration);
     fn visit_block_body(&mut self, block_body: &BlockBody);
     fn visit_statement(&mut self, statment: &Statement);

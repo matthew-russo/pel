@@ -365,7 +365,7 @@ impl Parser {
         let name_token = self.expect(IDENTIFIER, "function_signature")?;
         let name = Self::extract_identifier(&name_token).unwrap();
 
-        let type_params = match self.current_token() {
+        let type_parameters = match self.current_token() {
             Token::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
@@ -375,19 +375,19 @@ impl Parser {
 
         self.expect(Token::OpenParen, "function_signature")?;
 
-        let mut params = Vec::new();
+        let mut parameters = Vec::new();
 
         match self.current_token() {
             Token::CloseParen => (),
             _ => {
                 let param = self.function_parameter()?;
-                params.push(param);
+                parameters.push(param);
                 loop {
                     match self.current_token() {
                         Token::Comma => {
                             self.expect(Token::Comma, "function_signature")?;
                             let param = self.function_parameter()?;
-                            params.push(param);
+                            parameters.push(param);
                         },
                         _ => break
                     }
@@ -429,8 +429,8 @@ impl Parser {
 
         Ok(FunctionSignature {
             name,
-            type_params,
-            params,
+            type_parameters,
+            parameters,
             returns,
         })
     }

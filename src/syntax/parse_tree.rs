@@ -200,13 +200,6 @@ pub(crate) enum Value {
 }
 
 impl Value {
-    fn to_int(&self) -> Option<i32> {
-        match self {
-            Value::IntegerValue(i) => Some(*i),
-            _ => None
-        }
-    }
-
     fn to_bool(&self) -> Option<bool> {
         match self {
             Value::BooleanValue(b) => Some(*b),
@@ -214,11 +207,59 @@ impl Value {
         }
     }
 
-    // TODO -> This should take floats too
+    fn to_string(&self) -> Option<String> {
+        match self {
+            Value::StringValue(s) => Some(s.clone()),
+            _ => None
+        }
+    }
+
+    fn to_char(&self) -> Option<char> {
+        match self {
+            Value::CharValue(c) => Some(*c),
+            _ => None
+        }
+    }
+
+    fn to_int(&self) -> Option<i32> {
+        match self {
+            Value::IntegerValue(i) => Some(*i),
+            _ => None
+        }
+    }
+
+    fn to_float(&self) -> Option<f32> {
+        match self {
+            Value::FloatValue(f) => Some(*f),
+            _ => None
+        }
+    }
+
     pub fn add(lhs: Self, rhs: Self) -> Self {
+        match lhs {
+            Value::IntegerValue(_) => Self::int_add(lhs, rhs),
+            Value::FloatValue(_) => Self::float_add(lhs, rhs),
+            Value::StringValue(_) => Self::string_add(lhs, rhs),
+            v => panic!("unable to add value with lhs: {:?}", v),
+        }
+    }
+
+    pub fn int_add(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Value::IntegerValue(lhs + rhs);
+    }
+
+    pub fn float_add(lhs: Self, rhs: Self) -> Self {
+        let lhs = lhs.to_float().unwrap();
+        let rhs = rhs.to_float().unwrap();
+        return Value::FloatValue(lhs + rhs);
+    }
+
+    pub fn string_add(lhs: Self, rhs: Self) -> Self {
+        let lhs = lhs.to_string().unwrap();
+        let rhs = rhs.to_string().unwrap();
+        return Value::StringValue(format!("{}{}", lhs, rhs));
     }
 
     // TODO -> This should take floats too

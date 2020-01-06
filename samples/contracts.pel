@@ -1,27 +1,42 @@
 func main() {
-  let greeter: Greeter := EnglishGreeter {};
-  print(greeter.greet("matthew"));
-  print(greeter.goodbye());
+  let greeter1: Greeter := EnglishGreeter { greeting: "hello", };
+  print(greeter1.greet("matthew"));
+
+  let greeter2: Greeter := EnglishGreeter { greeting: "howdy", };
+  print(greeter2.greet("matthew"));
+
+  let greeter3: Greeter := SpanishGreeter { how_to_say_hello: "hola", };
+  print(greeter3.greet("matthew"));
 }
 
 contract Greeter {
-  func greet(name: string) -> string;
+  func greet(self, name: string) -> string;
 }
 
 object EnglishGreeter {
   fields {
-
+    greeting: string,
   }
 
-  methods {
-    func goodbye(self) -> string {
-      return "goodbye";
-    }
-  }
+  methods { }
 }
 
 implement Greeter for EnglishGreeter {
-  func greet(name: string) -> string {
-    return "hello " + name;
+  func greet(self, name: string) -> string {
+    return self.greeting + " " + name;
+  }
+}
+
+object SpanishGreeter {
+  fields {
+    how_to_say_hello: string,
+  }
+
+  methods { }
+}
+
+implement Greeter for SpanishGreeter {
+  func greet(self, name: string) -> string {
+    return self.how_to_say_hello + " " + name;
   }
 }

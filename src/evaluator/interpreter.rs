@@ -19,6 +19,8 @@ use crate::evaluator::evaluator::{
     SymbolId,
     SymbolTable,
     SymHash,
+    VTables,
+    VTable,
 };
 use crate::syntax::parse_tree::*;
 
@@ -49,6 +51,7 @@ use crate::syntax::parse_tree::*;
 
 pub(crate) struct Interpreter {
     pub symbol_table: SymbolTable,
+    pub vtables: VTables,
     global_env: Arc<RwLock<Environment>>,
     current_env: Arc<RwLock<Environment>>,
     pub last_local: Option<SymbolId>,
@@ -74,6 +77,7 @@ impl Interpreter {
 
         Self {
             symbol_table,
+            vtables: VTables::new(),
             global_env: Arc::clone(&root_env),
             current_env: root_env,
             last_local: None,
@@ -134,13 +138,9 @@ impl Evaluator for Interpreter {
         match decl {
             EnumDeclarationNode(enum_decl) => self.visit_enum_declaration(enum_decl),
 
-            ContractDeclarationNode(contract_decl) => {
-                self.visit_contract_declaration(contract_decl)
-            }
+            ContractDeclarationNode(contract_decl) => self.visit_contract_declaration(contract_decl),
 
-            ImplementationDeclarationNode(impl_decl) => {
-                self.visit_implementation_declaration(impl_decl)
-            }
+            ImplementationDeclarationNode(impl_decl) => self.visit_implementation_declaration(impl_decl),
 
             ObjectDeclarationNode(obj_decl) => self.visit_object_declaration(obj_decl),
 
@@ -185,6 +185,7 @@ impl Evaluator for Interpreter {
             variants,
             variant_funcs: HashMap::new(),
             methods: HashMap::new(),
+            vtables: HashMap::new(),
         };
 
         let enu_sym_id = self.symbol_table.gen_id();
@@ -195,6 +196,7 @@ impl Evaluator for Interpreter {
                 if vd.contains.is_none() {
                     let initialized_enum = EnumInstance {
                         ty: enu_sym_id,
+                        contract_ty: None,
                         variant: (vd.name.clone(), None),
                     };
 
@@ -273,6 +275,7 @@ impl Evaluator for Interpreter {
                         
                         let initialized_enum = EnumInstance {
                             ty,
+                            contract_ty: None,
                             variant: (name, contains),
                         };
 
@@ -294,6 +297,7 @@ impl Evaluator for Interpreter {
             .methods
             .iter()
             .map(|fd| {
+                self.last_local = Some(enu_sym_id);
                 self.visit_function_declaration(fd);
                 let method_id = self.last_local.take().unwrap();
                 (fd.signature.name.clone(), method_id)
@@ -337,37 +341,40 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let mut obj = Object {
+        let obj = Object {
             parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
             name: obj_decl.type_name.clone(),
             type_arguments,
             fields,
             methods: HashMap::new(),
+            vtables: HashMap::new(),
         };
 
-        let sym_id = self.symbol_table.gen_id();
+        let obj_sym_id = self.symbol_table.new_symbol(Symbol::Object(obj));
 
-        obj.methods = obj_decl
-            .methods
+        let methods = obj_decl.methods
             .iter()
             .map(|fd| {
-                self.last_local = Some(sym_id);
+                self.last_local = Some(obj_sym_id);
                 self.visit_function_declaration(fd);
                 let method_id = self.last_local.take().unwrap();
                 (fd.signature.name.clone(), method_id)
             })
             .collect();
 
-        let obj_sym = Symbol::Object(obj);
+        let obj_sym = self.symbol_table.load_symbol(obj_sym_id);
+        let mut obj_sym_writable = obj_sym.write().unwrap();
+        if let Symbol::Object(ref mut o) = obj_sym_writable.deref_mut() {
+            o.methods = methods;
+        }
 
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
         self.current_env = parent_env;
 
-        self.symbol_table.new_symbol_with_id(obj_sym, sym_id);
         self.current_env
             .write()
             .unwrap()
-            .define(obj_decl.type_name.clone(), sym_id);
+            .define(obj_decl.type_name.clone(), obj_sym_id);
     }
 
     fn visit_contract_declaration(&mut self, contract_decl: &ContractDeclaration) {
@@ -384,26 +391,208 @@ impl Evaluator for Interpreter {
 
         self.current_env = Arc::new(RwLock::new(local_env));
 
-        let required_functions = contract_decl.functions
-            .iter()
-            .map(|fs| {
-                self.visit_function_signature(&fs);
-                self.last_local.take().unwrap()
-            })
-            .collect();
-
         let contract = Contract {
             parent: SymbolTable::MAIN_MODULE_SYMBOL_ID,
             name: contract_decl.type_name.clone(),
             type_arguments,
-            required_functions,
+            required_functions: Vec::new(),
         };
 
-        panic!("unimplemented visit_contract_declaration");
+        let contract_sym_id = self.symbol_table.new_symbol(Symbol::Contract(contract));
+
+        let required_functions = contract_decl.functions
+                .iter()
+                .map(|fs| {
+                    self.last_local = Some(contract_sym_id);
+                    self.visit_function_signature(&fs);
+                    self.last_local.take().unwrap()
+                })
+                .collect();
+
+        let contract_sym = self.symbol_table.load_symbol(contract_sym_id);
+        let mut contract_sym_writable = contract_sym.write().unwrap();
+        if let Symbol::Contract(ref mut c) = contract_sym_writable.deref_mut() {
+            c.required_functions = required_functions;
+        }
+
+        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        self.current_env = parent_env;
+
+        self.last_local = Some(contract_sym_id);
+
+        self.current_env
+            .write()
+            .unwrap()
+            .define(contract_decl.type_name.clone(), contract_sym_id);
     }
 
     fn visit_implementation_declaration(&mut self, impl_decl: &ImplementationDeclaration) {
-        panic!("unimplemented visit_implementation_declaration");
+        let local_env = Environment::from_parent(&self.current_env);
+        self.current_env = Arc::new(RwLock::new(local_env));
+
+        self.visit_expression(&impl_decl.implementing_type);
+        let implementor_type_sym_id = self.last_local.take().unwrap();
+        let implementor_type_sym = self.symbol_table.load_symbol(implementor_type_sym_id);
+
+        self.visit_expression(&impl_decl.contract);
+        let contract_sym_id = self.last_local.take().unwrap();
+        let contract_sym = self.symbol_table.load_symbol(contract_sym_id);
+
+        let vtable = VTable {
+            implementor: implementor_type_sym_id,
+            implementing: contract_sym_id,
+            functions: HashMap::new(),
+        };
+
+        let vptr = self.vtables.new_vtable(vtable);
+
+        {
+            let mut implementor_type_writable = implementor_type_sym.write().unwrap();
+            match implementor_type_writable.deref_mut() {
+                Symbol::Object(o) => {
+                    o.vtables.insert(contract_sym_id, vptr);
+                },
+                Symbol::Enum(e) => {
+                    e.vtables.insert(contract_sym_id, vptr);
+                },
+                s => {
+                    let message = format!("Expected implementing type to be an Object or Enum but got: {}", s.sym_hash(&self.symbol_table).unwrap());
+                    panic!(message);
+                },
+            }
+        }
+
+        let required_functions_by_name: HashMap<String, SymbolId> = if let Symbol::Contract(c) = contract_sym.read().unwrap().deref() {
+            c.required_functions
+                .iter()
+                .map(|sym_id| {
+                    let req_func_sym = self.symbol_table.load_symbol(*sym_id);
+                    let req_func_sym_readable = req_func_sym.read().unwrap();
+                    return if let Symbol::FunctionSignature(fs) = req_func_sym_readable.deref() {
+                        (fs.name.clone(), *sym_id)
+                    } else {
+                        let message = format!("COMPILER BUG: Contract required function is not a FunctionSignature: {:?}", req_func_sym);
+                        panic!(message);
+                    }
+                })
+                .collect()
+        } else {
+            let message = format!("Expected Contract implementation to be a Contract but got {}", contract_sym.read().unwrap().get_type());
+            panic!(message);
+        };
+
+        let implementing_functions_by_name: HashMap<String, SymbolId> = impl_decl.functions
+            .iter()
+            .map(|fd| {
+                self.last_local = Some(implementor_type_sym_id);
+                self.visit_function_declaration(fd);
+                let sym_id = self.last_local.take().unwrap();
+                let impl_func_sym = self.symbol_table.load_symbol(sym_id);
+                let impl_func_sym_readable = impl_func_sym.read().unwrap();
+                return if let Symbol::Function(f) = impl_func_sym_readable.deref() {
+                    let impl_sig_sym = self.symbol_table.load_symbol(f.signature);
+                    let impl_sig_sym_readable = impl_sig_sym.read().unwrap();
+                    let impl_sig = if let Symbol::FunctionSignature(fs) = impl_sig_sym_readable.deref() {
+                        fs
+                    } else {
+                        let message = format!("COMPILER BUG: Siganture of function: {:?} is not a FunctionSignature: {:?}", f, impl_sig_sym);
+                        panic!(message);
+                    };
+
+                    (impl_sig.name.clone(), sym_id)
+                } else {
+                    let message = format!("COMPILER BUG: Contract required function is not a FunctionSignature: {:?}", impl_func_sym);
+                    panic!(message);
+                } 
+            })
+            .collect();
+
+        for (req_name, req_sig_id) in required_functions_by_name.iter() {
+            let req_sig_sym = self.symbol_table.load_symbol(*req_sig_id);
+            let req_sig_sym_readable = req_sig_sym.read().unwrap();
+            let req_sig = if let Symbol::FunctionSignature(f) = req_sig_sym_readable.deref() {
+                f
+            } else {
+                let message = format!("COMPILER BUG: Symbol pointing to required function signature is a {} but expected a FunctionSignature", 
+                                      req_sig_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            };
+
+            if !implementing_functions_by_name.contains_key(req_name) {
+                let message = format!("Contract implementation for {} by {} requires function {}",
+                                      contract_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                                      implementor_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                                      req_sig.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            }
+
+            let implementor_id = implementing_functions_by_name.get(req_name).unwrap();
+            let implementor_func_sym = self.symbol_table.load_symbol(*implementor_id);
+            let implementor_func_sym_readable = implementor_func_sym.read().unwrap();
+            let implementor_func = if let Symbol::Function(f) = implementor_func_sym_readable.deref() {
+                f
+            } else {
+                let message = format!("COMPILER BUG: Symbol pointed to implementing function is a {} but expected a Function", 
+                                      implementor_func_sym_readable.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            };
+
+            let implementor_func_sig_sym = self.symbol_table.load_symbol(implementor_func.signature);
+            let implementor_func_sig_sym_readable = implementor_func_sig_sym.read().unwrap();
+            let implementor_func_sig = if let Symbol::FunctionSignature(fs) = implementor_func_sig_sym_readable.deref() {
+                fs
+            } else {
+                
+                let message = format!("COMPILER BUG: Symbol pointing function signature is a {} but expected a FunctionSignature", 
+                                      implementor_func_sig_sym_readable.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            };
+         
+            if !req_sig.is_compatible_with(&implementor_func_sig, &self.symbol_table) {
+                let message = format!("Function with name: {} has signature: {} but expected: {}",
+                                      req_name,
+                                      req_sig.sym_hash(&self.symbol_table).unwrap(),
+                                      implementor_func_sig.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            }
+        }
+
+        for (_impl_name, func_id) in implementing_functions_by_name.iter() {
+            let func_sym = self.symbol_table.load_symbol(*func_id);
+            let func_sym_readable = func_sym.read().unwrap();
+            let func = if let Symbol::Function(f) = func_sym_readable.deref() {
+                f
+            } else {
+                let message = format!("COMPILER BUG: Symbol pointed to implementing function is a {} but expected a Function", 
+                                      func_sym_readable.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            };
+
+            let func_sig_sym = self.symbol_table.load_symbol(func.signature);
+            let func_sig_sym_readable = func_sig_sym.read().unwrap();
+            let func_sig = if let Symbol::FunctionSignature(fs) = func_sig_sym_readable.deref() {
+                fs
+            } else {
+                let message = format!("COMPILER BUG: Symbol pointed to by signature of function: {} is a {} but expected a FunctionSignature", 
+                                      func.sym_hash(&self.symbol_table).unwrap(),
+                                      func_sig_sym_readable.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            };
+
+            if !required_functions_by_name.contains_key(&func_sig.name) {
+                let message = format!("Contract implementation for {} by {} contains unknown function: {}",
+                                      contract_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                                      implementor_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                                      func.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
+            }
+        }
+    
+        let vtable = self.vtables.load_vtable(vptr);
+        vtable.write().unwrap().functions = implementing_functions_by_name;
+
+        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        self.current_env = parent_env;
     }
 
     fn visit_variant_declaration(&mut self, variant_decl: &VariantDeclaration) {
@@ -422,10 +611,9 @@ impl Evaluator for Interpreter {
         };
 
         if already_exists {
-            // let message = format!("function {} already defined at {}", name,
-            // sym.defined_at());
-            self.emit_error("function already defined".into());
-            return;
+            let message = format!("function '{}' already defined in the current environment",
+                                  name);
+            panic!(message);
         }
 
         self.visit_function_signature(&func_decl.signature);
@@ -511,15 +699,14 @@ impl Evaluator for Interpreter {
         use Statement::*;
 
         match statement {
-            VariableAssignmentNode(var_assignment) => {
-                self.visit_variable_assignment(var_assignment);
-            }
-            ReturnNode(return_node) => {
-                self.visit_return(&return_node);
-            }
-            ExpressionNode(expr_node) => {
-                self.visit_expression(expr_node);
-            }
+            VariableAssignmentNode(var_assignment) =>
+                self.visit_variable_assignment(var_assignment),
+
+            ReturnNode(return_node) =>
+                self.visit_return(&return_node),
+
+            ExpressionNode(expr_node) =>
+                self.visit_expression(expr_node),
         }
     }
 
@@ -549,12 +736,27 @@ impl Evaluator for Interpreter {
         let value_type_sym_id = value.read().unwrap().get_type();
 
         if value_type_sym_id != target_type_sym_id {
-            let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
             let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
+            let value_type_sym_writable = value_type_sym.write().unwrap();
+            let is_error_state = match value_type_sym_writable.deref() {
+                Symbol::Object(o) => !o.vtables.contains_key(&target_type_sym_id),
+                Symbol::Enum(e) => !e.vtables.contains_key(&target_type_sym_id),
+                _ => true,
+            };
 
-            panic!("expected a value of type: {}, but got {}",
-                   target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
-                   value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
+            if is_error_state {
+                let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
+                panic!("expected a value of type: {}, but got {}",
+                       target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                       value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
+            } else {
+                let mut value_writable = value.write().unwrap();
+                match value_writable.deref_mut() {
+                    Symbol::ObjectInstance(ref mut oi) => oi.contract_ty = Some(target_type_sym_id),
+                    Symbol::EnumInstance(ref mut ei) => ei.contract_ty = Some(target_type_sym_id),
+                    _ => (),
+                }
+            }
         }
 
         self.symbol_table.reassign_id(target_sym_id, value_sym_id);
@@ -749,21 +951,77 @@ impl Evaluator for Interpreter {
                     s => panic!("COMPILER BUG: parent of ObjectInstance must be an object but got {}", s.sym_hash(&self.symbol_table).unwrap()),
                 };
 
-                match obj.methods.get(&field_access.field_name) {
-                    Some(func_id) => {
-                        let self_sym = Symbol::SelfVariable(to_access_sym_id);
-                        let self_sym_id = self.symbol_table.new_symbol(self_sym);
-                        let func_invoc = FunctionInvocation {
-                            func_id: *func_id,
-                            args: vec![self_sym_id],
-                        };
-                        let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
-                        self.last_local = Some(sym_id);
-                    },
-                    None => {
-                        let message = format!("unknown field '{}' of object.", field_access.field_name);
-                        panic!(message);
+                if let Some(c_id) = oi.contract_ty {
+                    let vtable_id = match obj.vtables.get(&c_id) {
+                        Some(vt) => vt,
+                        None => {
+                            let message = format!("COMPILER BUG: contract_ty field of Object {} is populated but does not contain vtable",
+                                                  obj.sym_hash(&self.symbol_table).unwrap());
+                            panic!(message);
+                        },
+                    };
+
+                    let vtable = self.vtables.load_vtable(*vtable_id);
+                    let vtable_readable = vtable.read().unwrap();
+                    match vtable_readable.functions.get(&field_access.field_name) {
+                        Some(func_id) => {
+                            let self_sym = Symbol::SelfVariable(to_access_sym_id);
+                            let self_sym_id = self.symbol_table.new_symbol(self_sym);
+                            let func_invoc = FunctionInvocation {
+                                func_id: *func_id,
+                                args: vec![self_sym_id],
+                            };
+                            let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
+                            self.last_local = Some(sym_id);
+                            return;
+                        },
+                        None => {
+                            let contract_sym = self.symbol_table.load_symbol(c_id);
+                            let message = format!("unknown method '{}' of object: {}.",
+                                                  field_access.field_name,
+                                                  contract_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
+                            panic!(message);
+                        },
                     }
+                } else {
+                    match obj.methods.get(&field_access.field_name) {
+                        Some(func_id) => {
+                            let self_sym = Symbol::SelfVariable(to_access_sym_id);
+                            let self_sym_id = self.symbol_table.new_symbol(self_sym);
+                            let func_invoc = FunctionInvocation {
+                                func_id: *func_id,
+                                args: vec![self_sym_id],
+                            };
+                            let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
+                            self.last_local = Some(sym_id);
+                            return;
+                        },
+                        None => (),
+                    }
+
+                    for (_, vtable_id) in obj.vtables.iter() {
+                        let vtable = self.vtables.load_vtable(*vtable_id);
+                        let vtable_readable = vtable.read().unwrap();
+                        match vtable_readable.functions.get(&field_access.field_name) {
+                            Some(func_id) => {
+                                let self_sym = Symbol::SelfVariable(to_access_sym_id);
+                                let self_sym_id = self.symbol_table.new_symbol(self_sym);
+                                let func_invoc = FunctionInvocation {
+                                    func_id: *func_id,
+                                    args: vec![self_sym_id],
+                                };
+                                let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
+                                self.last_local = Some(sym_id);
+                                return;
+                            },
+                            None => (),
+                        }
+                    }
+
+                    let message = format!("unknown method '{}' of object: {}.",
+                                      field_access.field_name,
+                                      obj.sym_hash(&self.symbol_table).unwrap());
+                    panic!(message);
                 }
             },
             // Symbol::DataInstance {
@@ -930,6 +1188,7 @@ impl Evaluator for Interpreter {
 
         let initialized_object = ObjectInstance {
             ty: last_local_sym_id,
+            contract_ty: None,
             field_values,
         };
 
@@ -1256,7 +1515,8 @@ impl Callable<Interpreter> for Function {
         
         if signature.parameters.len() != args.len() {
             let message = format!(
-                "invalid number of parameters in function application. expected {}, got {}",
+                "invalid number of parameters in application of function: {}. expected {}, got {}",
+                self.sym_hash(&interpreter.symbol_table).unwrap(),
                 signature.parameters.len(),
                 args.len()
             );

@@ -5,6 +5,51 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
+pub(crate) type VTableId = u32;
+
+#[derive(Debug)]
+pub(crate) struct VTables {
+    next_id: VTableId,
+    vtables: HashMap<VTableId, Arc<RwLock<VTable>>>,
+}
+
+impl VTables {
+    pub fn new() -> Self {
+        Self {
+            next_id: 1,
+            vtables: HashMap::new(), 
+        }
+    }
+
+    pub fn new_vtable(&mut self, vtable: VTable) -> VTableId {
+        let id = self.gen_id();
+        self.vtables.insert(id, Arc::new(RwLock::new(vtable)));
+        id
+    }
+
+    pub fn new_symbol_with_id(&mut self, vtable: VTable, id: VTableId) {
+        self.vtables.insert(id, Arc::new(RwLock::new(vtable)));
+    }
+
+    pub fn gen_id(&mut self) -> VTableId {
+        let temp = self.next_id;
+        self.next_id = self.next_id + 1;
+        temp
+    }
+
+    pub fn load_vtable(&self, id: VTableId) -> Arc<RwLock<VTable>> {
+        // TODO -> don't unwrap this and have it return Result<Symbol, Error>
+        self.vtables.get(&id).unwrap().clone()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct VTable {
+    pub implementor: SymbolId,
+    pub implementing: SymbolId,
+    pub functions: HashMap<String, SymbolId>,
+}
+
 pub(crate) type SymbolId = u32;
 
 #[derive(Debug)]
@@ -231,6 +276,25 @@ impl Symbol {
             _ => false,
         }
     }
+
+    pub fn is_a(lower_id: SymbolId, upper_id: SymbolId, table: &SymbolTable) -> bool {
+        if lower_id == upper_id {
+            return true;
+        }
+
+        let lower = table.load_symbol(lower_id);
+        let lower_readable = lower.read().unwrap();
+
+        match lower_readable.deref() {
+            Symbol::Object(o) => {
+                o.vtables.contains_key(&upper_id)
+            },
+            Symbol::Enum(e) => {
+                e.vtables.contains_key(&upper_id)
+            },
+            _ => false,
+        }
+    }
 }
 
 impl SymHash for Symbol {
@@ -250,7 +314,10 @@ impl SymHash for Symbol {
             },
             Symbol::ValueType(vt) => {
                 vt.sym_hash(table)
-            }
+            },
+            Symbol::FunctionSignature(fs) => {
+                fs.sym_hash(table)
+            },
             Symbol::Function(f) => {
                 f.sym_hash(table)
             },
@@ -323,6 +390,7 @@ pub(crate) struct Object {
     pub type_arguments: Vec<(String, SymbolId)>,
     pub fields: HashMap<String, SymbolId>,
     pub methods: HashMap<String, SymbolId>,
+    pub vtables: HashMap<SymbolId, VTableId>, // id of the contract -> impls of functions
 }
 
 impl SymHash for Object {
@@ -358,6 +426,7 @@ impl SymHash for Object {
 #[derive(Clone, Debug)]
 pub(crate) struct ObjectInstance {
     pub ty: SymbolId,
+    pub contract_ty: Option<SymbolId>,
     pub field_values: HashMap<String, SymbolId>,
 }
 
@@ -369,6 +438,7 @@ pub(crate) struct Enum {
     pub variants: HashMap<String, Option<SymbolId>>,
     pub variant_funcs: HashMap<String, Symbol>,
     pub methods: HashMap<String, SymbolId>,
+    pub vtables: HashMap<SymbolId, VTableId>, // id of the contract -> impls of functions
 }
 
 impl SymHash for Enum {
@@ -395,6 +465,7 @@ impl SymHash for Enum {
 #[derive(Clone, Debug)]
 pub(crate) struct EnumInstance {
     pub ty: SymbolId,
+    pub contract_ty: Option<SymbolId>,
     pub variant: (String, Option<SymbolId>),
 }
 
@@ -404,6 +475,36 @@ pub(crate) struct FunctionSignature {
     pub type_parameters: Vec<(String, SymbolId)>,
     pub parameters: Vec<(String, SymbolId)>,
     pub returns: Option<SymbolId>,
+}
+
+impl FunctionSignature {
+    pub fn is_compatible_with(&self, other: &FunctionSignature, table: &SymbolTable) -> bool {
+        if self.name != other.name {
+            return false;
+        }
+
+        for ((n1, s1), (n2, s2)) in self.type_parameters.iter().zip(other.type_parameters.iter()) {
+            if !Symbol::is_a(*s2, *s1, table) {
+                return false;
+            }
+        }
+
+        for ((n1, s1), (n2, s2)) in self.parameters.iter().zip(other.parameters.iter()) {
+            if !Symbol::is_a(*s2, *s1, table) {
+                return false;
+            }
+        }
+
+        if let Some(ret_id) = self.returns {
+            if let Some(other_ret_id) = other.returns {
+                return Symbol::is_a(other_ret_id, ret_id, table);
+            } else {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 impl SymHash for FunctionSignature {
@@ -449,7 +550,7 @@ impl SymHash for FunctionSignature {
             None => String::new(),
         };
         
-        let hash = format!("func{}({}){}", type_params, params, returns);
+        let hash = format!("func{} {}({}){}", type_params, self.name, params, returns);
         Some(hash)
     }
 }

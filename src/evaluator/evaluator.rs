@@ -5,6 +5,321 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
+// Type vs Value
+//         but a value can "be" a type. ie point to a type
+
+// so a Value can be a(n):
+// - Reference to an Object Instance
+// - Reference to an Enum Instance
+// - Reference to a Contract Instance
+// - Reference to a Function
+// - Reference to a Module
+// - Reference to a Type
+// - Scalar
+
+// whereas things that result in a new Type are:
+// - Object Declarations
+// - Enum Declarations
+// - Contract Declarations
+// - Module Declarations
+// - Function Declarations (both top level and in other Types)
+
+// You cannot create any new Types at Runtime and all references to a
+// Type are immutable and will be evaluated at compile time.
+
+// Expressions in syntactic positions where a type is expected are evaluated
+// at compile time.
+//  ( I need to understand the implications this has on garbage
+//          collection and/or static allocations )
+//  ( Should I have a syntax construct like Zig's "comptime" )?
+
+enum Value {
+    Reference(Address),
+    Scalar(Scalar),
+}
+
+enum Item {
+    ObjectInstance(Arc<RwLock<ObjectInstance>>),
+    EnumInstance(Arc<RwLock<EnumInstance>>),
+    ContractInstance(Arc<RwLock<ContractInstance>>),
+    ModuleReference(KindId),
+    TypeReference(KindId),
+}
+
+impl Clone for Item {
+    fn clone(&self) -> Self {
+        use Item::*;
+
+        match self {
+            ObjectInstance(ref oi_arc)   => ObjectInstance(Arc::clone(oi_arc)),
+            EnumInstance(ref ei_arc)     => EnumInstance(Arc::clone(ei_arc)),
+            ContractInstance(ref ci_arc) => ContractInstance(Arc::clone(ci_arc)),
+            ModuleReference(ref ki)      => ModuleReference(ki),
+            TypeReference(ref ki)        => TypeReference(ki),
+        }
+    }
+}
+
+enum Scalar {
+    Boolean(bool),
+    Integer(i32),
+    Long(i64),
+    Float(f32),
+    Double(f64),
+    Char(char),
+}
+
+type Address = u32;
+
+// heap contains item
+struct Heap {
+    next_address: Address,
+    items: HashMap<Address, Item>,
+}
+
+impl Heap {
+    pub fn new() -> Self {
+
+    }
+
+    pub fn alloc(&mut self) -> Address {
+
+    }
+
+    pub fn free(&mut self, addr: Address) {
+        unimplemented!("gc doesn't exist yet");
+    }
+
+    pub fn load(&self, addr: Address) -> Option<Item> {
+        if self.items.contains_key(&addr) {
+            let item = self.items.get(&addr).unwrap();
+            Some(Item::clone(item))
+        } else {
+            None
+        }
+    }
+
+    pub fn store(&mut self, addr: Address, item: Item) {
+        self.items.insert(addr, item);
+    }
+
+    pub fn load_object_instance(&self, addr: Address) -> Option<Arc<RwLock<ObjectInstance>>> {
+        match self.load(addr) {
+            Some(item) => {
+                match item {
+                    Item::ObjectInstance(ref oi_arc) => Some(Arc::clone(oi_arc)),
+                    _ => None,
+                }
+            },
+            None => None
+        }
+    }
+
+    pub fn load_enum_instance(&self, addr: Address) -> Option<Arc<RwLock<EnumInstance>>> {
+        match self.load(addr) {
+            Some(item) => {
+                match item {
+                    Item::EnumInstance(ref ei_arc) => Some(Arc::clone(ei_arc)),
+                    _ => None,
+                }
+            },
+            None => None
+        }
+    }
+
+    pub fn load_contract_instance(&self, addr: Address) -> Option<Arc<RwLock<ContractInstance>>> {
+        match self.load(addr) {
+            Some(item) => {
+                match item {
+                    Item::ContractInstance(ref ci_arc) => Some(Arc::clone(ci_arc)),
+                    _ => None,
+                }
+            },
+            None => None
+        }
+    }
+
+    pub fn load_type_reference(&self, addr: Address) -> KindId {
+        match self.load(addr) {
+            Some(item) => {
+
+            },
+            None => None
+        }
+    }
+}
+
+enum Kind {
+    Object(Object),
+    Enum(Enum),
+    Contract(Contract),
+    Module(Module),
+    Function(Function),
+    ScalarType(),
+    Type(KindId), // probably want this to be different. probably want a table of type equivalence
+}
+
+type KindHash = String;
+
+trait KindHashable {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash;
+}
+
+impl KindHashable for Kind {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        use Kind::*;
+
+        match self {
+            Object(o) => o.kind_hash(kind_table),
+            Enum(e) => e.kind_hash(kind_table),
+            Contract(c) => c.kind_hash(kind_table),
+            Module(m) => m.kind_hash(kind_table),
+            Function(f) => f.kind_hash(kind_table),
+            Type(k_id) => {
+                let kind = kind_table.load(k_id);
+                kind.kind_hash(kind_table)
+            }
+        }
+    }
+}
+
+impl KindHashable for Object {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        let parent = table.load_symbol(self.parent);
+        let hash = parent.read().unwrap().sym_hash(table).unwrap();
+
+        let to_append = if !self.type_arguments.is_empty() {
+            let type_arg_sym_hash = self.type_arguments
+                .iter()
+                .map(|(type_var_name, sym_id)| {
+                    let type_var_sym = table.load_symbol(*sym_id);
+                    let readable_type_var_sym = type_var_sym.read().unwrap();
+                    match readable_type_var_sym.deref() {
+                        Symbol::TypeVariable(Some(tvt)) => {
+                            table.load_symbol(*tvt).read().unwrap().sym_hash(table).unwrap()
+                        },
+                        _ => type_var_name.clone()
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(",");
+   
+            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
+        } else {
+            String::new()
+        };
+        
+        [hash, self.name.clone(), to_append].join("::")
+
+    }
+}
+
+impl KindHashable for Enum {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        let parent = table.load_symbol(self.parent);
+        let hash = parent.read().unwrap().sym_hash(table).unwrap();
+
+        let to_append = if !self.type_arguments.is_empty() {
+            let type_arg_sym_hash = self.type_arguments
+                .iter()
+                .map(|(type_var_name, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
+                .collect::<Vec<String>>()
+                .join(",");
+   
+            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
+        } else {
+            String::new()
+        };
+        
+        [hash, self.name.clone(), to_append].join("::")
+    }
+}
+
+impl KindHashable for Contract {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        let parent = table.load_symbol(self.parent);
+        let hash = parent.read().unwrap().sym_hash(table).unwrap();
+
+        let to_append = if !self.type_arguments.is_empty() {
+            let type_arg_sym_hash = self.type_arguments
+                .iter()
+                .map(|(_, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
+                .collect::<Vec<String>>()
+                .join(",");
+   
+            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
+        } else {
+            String::new()
+        };
+        
+        [hash, self.name.clone(), to_append].join("::")
+    }
+}
+
+impl KindHashable for Module {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        let mut hash = String::new();
+        if let Some(ref p) = self.parent {
+            hash = p.read().unwrap().sym_hash(table).unwrap();
+        }
+
+        [hash, self.name.clone()].join("::")
+    }
+}
+
+impl KindHashable for Function {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        let type_params = if !self.type_parameters.is_empty() {
+            let tp_str = self.type_parameters
+                .iter()
+                .map(|(n, id)| {
+                    let sym = table.load_symbol(*id);
+                    let sym_readable = sym.read().unwrap();
+                    sym_readable.sym_hash(table).unwrap()
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+
+            format!("<{}>", tp_str)
+        } else {
+            String::new()
+        };
+
+        let params = if !self.parameters.is_empty() {
+            self.parameters
+                .iter()
+                .map(|(n, id)| {
+                    let sym = table.load_symbol(*id);
+                    let sym_readable = sym.read().unwrap();
+                    sym_readable.sym_hash(table).unwrap()
+                })
+                .collect::<Vec<String>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
+
+        let returns = match self.returns {
+            Some(id) => {
+                let return_sym = table.load_symbol(id);
+                let return_sym_readable = return_sym.read().unwrap();
+                let hash = return_sym_readable.sym_hash(table).unwrap();
+
+                format!(" -> {}", hash)
+            },
+            None => String::new(),
+        };
+        
+        let hash = format!("func{} {}({}){}", type_params, self.name, params, returns);
+        Some(hash)
+
+    }
+}
+
+struct KindTable {
+    kinds: HashMap<KindHash, Arc<RwLock<Kind>>>,
+}
+
 pub(crate) type VTableId = u32;
 
 #[derive(Debug)]
@@ -27,7 +342,7 @@ impl VTables {
         id
     }
 
-    pub fn new_symbol_with_id(&mut self, vtable: VTable, id: VTableId) {
+    pub fn new_vtable_with_id(&mut self, vtable: VTable, id: VTableId) {
         self.vtables.insert(id, Arc::new(RwLock::new(vtable)));
     }
 
@@ -48,104 +363,6 @@ pub(crate) struct VTable {
     pub implementor: SymbolId,
     pub implementing: SymbolId,
     pub functions: HashMap<String, SymbolId>,
-}
-
-pub(crate) type SymbolId = u32;
-
-#[derive(Debug)]
-pub(crate) struct SymbolTable {
-    next_id: SymbolId,
-    sym_hash_to_sym_id: HashMap<String, SymbolId>,
-    symbols: HashMap<SymbolId, Arc<RwLock<Symbol>>>,
-}
-
-impl SymbolTable {
-    pub const UNDEFINED_SYMBOL_ID: SymbolId    = std::u32::MAX;
-    pub const EMPTY_TYPE_VARIABLE_SYMBOL_ID: SymbolId = 0;
-    pub const STRING_TYPE_SYMBOL_ID: SymbolId  = 1;
-    pub const INT_TYPE_SYMBOL_ID: SymbolId     = 2;
-    pub const FLOAT_TYPE_SYMBOL_ID: SymbolId   = 3;
-    pub const CHAR_TYPE_SYMBOL_ID: SymbolId    = 4;
-    pub const BOOL_TYPE_SYMBOL_ID: SymbolId    = 5;
-    pub const OBJECT_TYPE_SYMBOL_ID: SymbolId  = 6;
-    pub const ENUM_TYPE_SYMBOL_ID: SymbolId    = 7;
-    pub const VALUE_TYPE_SYMBOL_ID: SymbolId   = 8;
-    pub const MAIN_MODULE_SYMBOL_ID: SymbolId  = 9;
-
-    pub fn new() -> Self {
-        let mut symbols = HashMap::new();
-
-        symbols.insert(Self::EMPTY_TYPE_VARIABLE_SYMBOL_ID, Arc::new(RwLock::new(Symbol::TypeVariable(None))));
-        symbols.insert(Self::MAIN_MODULE_SYMBOL_ID,         Arc::new(RwLock::new(Symbol::Module(Module {
-            parent: None,
-            name: "main".into(),
-            env: Arc::new(RwLock::new(Environment::root())),
-        } ))));
-
-        let mut sym_table = Self {
-            next_id: 10,
-            sym_hash_to_sym_id: HashMap::new(),
-            symbols,
-        };
-
-        let main_sym = sym_table.load_symbol(Self::MAIN_MODULE_SYMBOL_ID);
-        let mut main_sym_writable = main_sym.write().unwrap();
-        if let Symbol::Module(main) = main_sym_writable.deref_mut() {
-            main.env.write().unwrap().overwrite_with(prelude::prelude(&mut sym_table));
-        }
-
-        sym_table
-    }
-
-    pub fn new_symbol(&mut self, sym: Symbol) -> SymbolId {
-        let id = self.gen_id();
-        self.symbols.insert(id, Arc::new(RwLock::new(sym)));
-        id
-    }
-
-    pub fn new_symbol_with_id(&mut self, sym: Symbol, id: SymbolId) {
-        self.symbols.insert(id, Arc::new(RwLock::new(sym)));
-    }
-
-    pub fn gen_id(&mut self) -> SymbolId {
-        let temp = self.next_id;
-        self.next_id = self.next_id + 1;
-        temp
-    }
-
-    pub fn get_or_create_symbol(&mut self, sym: Symbol) -> SymbolId {
-        if let Some(hash) = sym.sym_hash(self) {
-            match self.sym_hash_to_sym_id.get(&hash) {
-                Some(id) => id.clone(),
-                None => {
-                    let id = self.gen_id();
-                    self.sym_hash_to_sym_id.insert(hash, id);
-                    self.symbols.insert(id, Arc::new(RwLock::new(sym)));
-                    id
-                },
-            }
-        } else {
-            let id = self.gen_id();
-            self.symbols.insert(id, Arc::new(RwLock::new(sym)));
-            id
-
-        }
-    }
-
-    pub fn load_symbol(&self, id: SymbolId) -> Arc<RwLock<Symbol>> {
-        // TODO -> don't unwrap this and have it return Result<Symbol, Error>
-        self.symbols.get(&id).unwrap().clone()
-    }
-
-    pub fn replace_symbol(&mut self, dest_id: SymbolId, value: Arc<RwLock<Symbol>>) {
-        self.symbols.insert(dest_id, value); 
-    }
-
-    pub fn reassign_id(&mut self, dest_id: SymbolId, value_id: SymbolId) {
-        let value = self.load_symbol(value_id);
-        self.symbols.insert(dest_id, value);
-    }
-
 }
 
 #[derive(Debug)]
@@ -188,10 +405,6 @@ impl Environment {
             None => None
         }
     }
-}
-
-pub(crate) trait SymHash {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String>;
 }
 
 #[derive(Clone, Debug)]
@@ -297,61 +510,11 @@ impl Symbol {
     }
 }
 
-impl SymHash for Symbol {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        match self {
-            Symbol::Module(m) => {
-                m.sym_hash(table)
-            },
-            Symbol::Contract(c) => {
-                c.sym_hash(table)
-            },
-            Symbol::Object(o) => {
-                o.sym_hash(table)
-            },
-            Symbol::Enum(e) => {
-                e.sym_hash(table)
-            },
-            Symbol::ValueType(vt) => {
-                vt.sym_hash(table)
-            },
-            Symbol::FunctionSignature(fs) => {
-                fs.sym_hash(table)
-            },
-            Symbol::Function(f) => {
-                f.sym_hash(table)
-            },
-            Symbol::TypeVariable(maybe_tv_id) => {
-                match maybe_tv_id {
-                    Some(tv_id) => {
-                        let tv_sym = table.load_symbol(*tv_id);
-                        let readable_tv_sym = tv_sym.read().unwrap();
-                        readable_tv_sym.sym_hash(table)
-                    },
-                    None => panic!("trying to take sym hash for TypeVariable Hole. is this valid??"),
-                }
-            },
-            _ => None
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct Module {
     pub parent: Option<Arc<RwLock<Module>>>,
     pub name: String,
     pub env: Arc<RwLock<Environment>>,
-}
-
-impl SymHash for Module {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        let mut hash = String::new();
-        if let Some(ref p) = self.parent {
-            hash = p.read().unwrap().sym_hash(table).unwrap();
-        }
-
-        Some([hash, self.name.clone()].join("::"))
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -362,27 +525,6 @@ pub(crate) struct Contract {
     pub required_functions: Vec<SymbolId>,
 }
 
-impl SymHash for Contract {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        let parent = table.load_symbol(self.parent);
-        let hash = parent.read().unwrap().sym_hash(table).unwrap();
-
-        let to_append = if !self.type_arguments.is_empty() {
-            let type_arg_sym_hash = self.type_arguments
-                .iter()
-                .map(|(_, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
-                .collect::<Vec<String>>()
-                .join(",");
-   
-            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
-        } else {
-            String::new()
-        };
-        
-        Some([hash, self.name.clone(), to_append].join("::"))
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct Object {
     pub parent: SymbolId,
@@ -391,36 +533,6 @@ pub(crate) struct Object {
     pub fields: HashMap<String, SymbolId>,
     pub methods: HashMap<String, SymbolId>,
     pub vtables: HashMap<SymbolId, VTableId>, // id of the contract -> impls of functions
-}
-
-impl SymHash for Object {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        let parent = table.load_symbol(self.parent);
-        let hash = parent.read().unwrap().sym_hash(table).unwrap();
-
-        let to_append = if !self.type_arguments.is_empty() {
-            let type_arg_sym_hash = self.type_arguments
-                .iter()
-                .map(|(type_var_name, sym_id)| {
-                    let type_var_sym = table.load_symbol(*sym_id);
-                    let readable_type_var_sym = type_var_sym.read().unwrap();
-                    match readable_type_var_sym.deref() {
-                        Symbol::TypeVariable(Some(tvt)) => {
-                            table.load_symbol(*tvt).read().unwrap().sym_hash(table).unwrap()
-                        },
-                        _ => type_var_name.clone()
-                    }
-                })
-                .collect::<Vec<String>>()
-                .join(",");
-   
-            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
-        } else {
-            String::new()
-        };
-        
-        Some([hash, self.name.clone(), to_append].join("::"))
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -439,27 +551,6 @@ pub(crate) struct Enum {
     pub variant_funcs: HashMap<String, Symbol>,
     pub methods: HashMap<String, SymbolId>,
     pub vtables: HashMap<SymbolId, VTableId>, // id of the contract -> impls of functions
-}
-
-impl SymHash for Enum {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        let parent = table.load_symbol(self.parent);
-        let hash = parent.read().unwrap().sym_hash(table).unwrap();
-
-        let to_append = if !self.type_arguments.is_empty() {
-            let type_arg_sym_hash = self.type_arguments
-                .iter()
-                .map(|(type_var_name, sym_id)| table.load_symbol(*sym_id).read().unwrap().sym_hash(table).unwrap())
-                .collect::<Vec<String>>()
-                .join(",");
-   
-            ["<<".into(), type_arg_sym_hash, ">>".into()].join("")
-        } else {
-            String::new()
-        };
-        
-        Some([hash, self.name.clone(), to_append].join("::"))
-    }
 }
 
 #[derive(Clone, Debug)]

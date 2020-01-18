@@ -24,7 +24,6 @@ use crate::evaluator::evaluator::{
 };
 use crate::syntax::parse_tree::*;
 
-
 //        -- environment --            ----- state -----
 //      /                   \        /                   \
 // name                       symbol                      value

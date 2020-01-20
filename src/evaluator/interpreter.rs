@@ -15,12 +15,9 @@ use crate::evaluator::evaluator::{
     NativeFunction,
     Object,
     ObjectInstance,
-    Symbol,
-    SymbolId,
-    SymbolTable,
-    SymHash,
     VTables,
     VTable,
+    KindTable,
 };
 use crate::syntax::parse_tree::*;
 
@@ -49,11 +46,11 @@ use crate::syntax::parse_tree::*;
 // +------+---------------+---------------+
 
 pub(crate) struct Interpreter {
-    pub symbol_table: SymbolTable,
+    pub kind_table: KindTable,
     pub vtables: VTables,
     global_env: Arc<RwLock<Environment>>,
     current_env: Arc<RwLock<Environment>>,
-    pub last_local: Option<SymbolId>,
+    pub stack: Vec<Value>,
     exiting: bool,
     errors: Vec<String>,
 }
@@ -122,6 +119,23 @@ impl Interpreter {
     pub fn set_current_env(&mut self, env: Environment) {
         self.current_env = Arc::new(RwLock::new(env));
     }
+
+    fn get_obj_method_with_name(&self, obj: &Object, name: &String) -> Option<Value> {
+        if let Some(func_hash) = obj.methods.get(name) {
+            // create Reference to func_hash
+            // return Reference
+        }
+
+        for (_, vtable_id) in obj.vtables.iter() {
+            let vtable = self.vtables.load_vtable(*vtable_id);
+            let vtable_readable = vtable.read().unwrap();
+
+            if let Some(func_hash) = vtable_readable.functions.get(name) {
+                // create Reference to func_hash
+                // return Reference
+            }
+        }
+    }
 }
 
 impl Evaluator for Interpreter {
@@ -135,15 +149,20 @@ impl Evaluator for Interpreter {
         use Declaration::*;
 
         match decl {
-            EnumDeclarationNode(enum_decl) => self.visit_enum_declaration(enum_decl),
+            EnumDeclarationNode(enum_decl)
+                => self.visit_enum_declaration(enum_decl),
 
-            ContractDeclarationNode(contract_decl) => self.visit_contract_declaration(contract_decl),
+            ContractDeclarationNode(contract_decl)
+                => self.visit_contract_declaration(contract_decl),
 
-            ImplementationDeclarationNode(impl_decl) => self.visit_implementation_declaration(impl_decl),
+            ImplementationDeclarationNode(impl_decl)
+                => self.visit_implementation_declaration(impl_decl),
 
-            ObjectDeclarationNode(obj_decl) => self.visit_object_declaration(obj_decl),
+            ObjectDeclarationNode(obj_decl)
+                => self.visit_object_declaration(obj_decl),
 
-            FunctionDeclarationNode(func_decl) => self.visit_function_declaration(func_decl),
+            FunctionDeclarationNode(func_decl)
+                => self.visit_function_declaration(func_decl),
         }
     }
 
@@ -201,84 +220,49 @@ impl Evaluator for Interpreter {
 
                     (vd.name.clone(), Symbol::EnumInstance(initialized_enum))
                 } else {
-                    let enum_constructor = |interp: &mut Interpreter, args: Vec<SymbolId>| {
-                        let ty_sym_id = args.iter().nth(0).unwrap();
-                        let ty_sym = interp.symbol_table.load_symbol(*ty_sym_id);
-                        let ty_sym_readable = ty_sym.read().unwrap();
-                        let ty = match ty_sym_readable.deref() {
-                            Symbol::Value(Value::IntegerValue(i)) => *i as u32,
-                            _ => {
-                                let message = format!("COMPILER BUG: first argument to enum variant constructor should be an integer -- the SymbolId of the enum -- but was {}",
-                                                      ty_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                                panic!(message);
-                            },
-                        };
+                    let enum_constructor = |interp: &mut Interpreter, args: Vec<Value>| {
+                        let enu_kind_hash = self.heap.load(args[0].to_ref().unwrap().address).string_value();
 
-                        let name_sym_id = args.iter().nth(1).unwrap();
-                        let name_sym = interp.symbol_table.load_symbol(*name_sym_id);
-                        let name_sym_readable = name_sym.read().unwrap();
-                        let name = match name_sym_readable.deref() {
-                            Symbol::Value(Value::StringValue(s)) => s.clone(),
-                            _ => {
-                                let message = format!("COMPILER BUG: second argument to enum variant constructor should be a string -- the name of the variant -- but was {}",
-                                                      name_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                                panic!(message);
-                            },
-                        };
+                        let variant_name_item = self.heap.load(args[1].to_ref().unwrap().address);
+                        let variant_name = variant_name_item.string_value();
 
-                        let does_contain_type_sym_id = args.iter().nth(2).unwrap();
-                        let does_contain_type_sym = interp.symbol_table.load_symbol(*does_contain_type_sym_id);
-                        let does_contain_type_sym_readable = does_contain_type_sym.read().unwrap();
-                        let does_contain_type = match does_contain_type_sym_readable.deref() {
-                            Symbol::Value(Value::BooleanValue(b)) => *b,
-                            _ => {
-                                let message = format!("COMPILER BUG: third argument to enum variant constructor should be a boolean -- whether the variant contains a type -- but was {}",
-                                                      does_contain_type_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                                panic!(message);
-                            },
-                        };
+                        let does_contain_ty = args[2].to_scalar().unwrap().to_bool().unwrap();
 
-                        let contains = if does_contain_type {
-                            let contains_type_id_sym_id = args.iter().nth(3).unwrap();
-                            let contains_type_id_sym = interp.symbol_table.load_symbol(*contains_type_id_sym_id);
-                            let contains_type_id_sym_readable = contains_type_id_sym.read().unwrap();
-                            let contains_type_id = match contains_type_id_sym_readable.deref() {
-                                Symbol::Value(Value::IntegerValue(i)) => *i as u32 as SymbolId,
-                                _ => {
-                                    let message = format!("COMPILER BUG: fourth argument to enum variant constructor should be an Integer -- the SymbolId of the type it contains -- but was {}",
-                                                          contains_type_id_sym_readable.sym_hash(&interp.symbol_table).unwrap());
-                                    panic!(message);
-                                },
-                            };
+                        let contains = if does_contain_ty {
+                            let contains_kind_hash = self.heap.load(args[3].to_ref().unwrap().address);
 
-                            let contains_sym_id = args.iter().nth(4).unwrap();
-                            let contains_sym = interp.symbol_table.load_symbol(*contains_sym_id);
-                            let contains_sym_readable = contains_sym.read().unwrap();
-                            if contains_type_id != contains_sym_readable.get_type() {
-                                let supposed_to_contain = interp.symbol_table.load_symbol(contains_type_id);
-                                let supposed_to_contain_readable = supposed_to_contain.read().unwrap();
+                            let contains_ref = args[4].to_ref().unwrap();
 
-                                let actually_contains = interp.symbol_table.load_symbol(contains_sym_readable.get_type());
-                                let actually_contains_readable = actually_contains.read().unwrap();
+                            if contains_ref.ty != contains_kind_hash {
                                 let message = format!("expected enum variant: {} to contain type {}, but got {}",
-                                                      name,
-                                                      supposed_to_contain_readable.sym_hash(&interp.symbol_table).unwrap(),
-                                                      actually_contains_readable.sym_hash(&interp.symbol_table).unwrap());
+                                                      variant_name,
+                                                      contains_kind_hash,
+                                                      contains_ref.ty);
                                 panic!(message);
                             }
-                            
-                            Some(*contains_sym_id)
+
+                            Some(Reference::clone(contains_ref))
                         } else {
                             None
                         };
                         
-                        let initialized_enum = EnumInstance {
-                            ty,
+                        let enum_instance = EnumInstance {
+                            ty: enu_kind_hash,
                             contract_ty: None,
-                            variant: (name, contains),
+                            variant: (variant_name, contains),
                         };
 
-                        Some(interp.symbol_table.new_symbol(Symbol::EnumInstance(initialized_enum)))
+                        let addr = self.heap.alloc();
+                        let enum_item = Item::EnumInstance(Arc::new(RwLock::new(enum_instance)));
+                        self.heap.store(addr, enum_item);
+
+                        let reference = Reference {
+                            ty: enu_kind_hash,
+                            is_self: false,
+                            address: addr,
+                            size: std::u32::MAX,
+                        };
+                        self.stack.push(Value::Reference(reference));
                     };
 
                     let nat_func = NativeFunction {
@@ -710,55 +694,19 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_variable_assignment(&mut self, var_assignment: &VariableAssignment) {
-        if let Some(var_name) = self.var_name_to_define(var_assignment) {
-            let symbol_id = self
-                .symbol_table
-                .new_symbol(Symbol::Value(Value::IntegerValue(0)));
-
-            self.current_env
-                .write()
-                .unwrap()
-                // TODO -> This isn't right...
-                .define(var_name, symbol_id);
-        }
-
-        self.visit_expression(&var_assignment.target);
-        let target_sym_id = self.last_local.take().unwrap();
-
         self.visit_expression(&var_assignment.target_type);
-        let target_type_sym_id = self.last_local.take().unwrap();
+        let target_type_reference = self.stack.pop().unwrap();
 
         self.visit_expression(&var_assignment.value);
-        let value_sym_id = self.last_local.take().unwrap();
-
-        let value = self.symbol_table.load_symbol(value_sym_id);
-        let value_type_sym_id = value.read().unwrap().get_type();
-
-        if value_type_sym_id != target_type_sym_id {
-            let value_type_sym = self.symbol_table.load_symbol(value_type_sym_id);
-            let value_type_sym_writable = value_type_sym.write().unwrap();
-            let is_error_state = match value_type_sym_writable.deref() {
-                Symbol::Object(o) => !o.vtables.contains_key(&target_type_sym_id),
-                Symbol::Enum(e) => !e.vtables.contains_key(&target_type_sym_id),
-                _ => true,
-            };
-
-            if is_error_state {
-                let target_type_sym = self.symbol_table.load_symbol(target_type_sym_id);
-                panic!("expected a value of type: {}, but got {}",
-                       target_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
-                       value_type_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
-            } else {
-                let mut value_writable = value.write().unwrap();
-                match value_writable.deref_mut() {
-                    Symbol::ObjectInstance(ref mut oi) => oi.contract_ty = Some(target_type_sym_id),
-                    Symbol::EnumInstance(ref mut ei) => ei.contract_ty = Some(target_type_sym_id),
-                    _ => (),
-                }
-            }
+        let value = self.stack.pop().unwrap();
+        // TODO -> type check
+        if value.get_type() != target_type_reference {
+            // TODO -> maybe set the contract_ty field of ObjectInstance or EnumInstance so we can
+            // track whether this object is acting as a Contract?
         }
 
-        self.symbol_table.reassign_id(target_sym_id, value_sym_id);
+        let addr = self.resolve_address(var_assignment.target);
+        self.heap.store(addr, value);
     }
 
     fn visit_return(&mut self, return_stmt: &Return) {
@@ -820,24 +768,21 @@ impl Evaluator for Interpreter {
                 BinaryOperationNode(bin_op) => self.visit_binary_operation(bin_op),
             };
         }
-
     }
 
     fn visit_conditional(&mut self, conditional: &Conditional) {
         for if_expr in conditional.if_exprs.iter() {
             self.visit_expression(&if_expr.condition);
-            let cond_sym_id = self.last_local.take().unwrap();
-            let cond_sym = self.symbol_table.load_symbol(cond_sym_id);
-            let cond_sym_readable = cond_sym.read().unwrap();
-            match cond_sym_readable.deref() {
-                Symbol::Value(Value::BooleanValue(cond)) => {
-                    if *cond {
+            let cond_value = self.stack.pop().unwrap();
+            match cond_value.to_bool() {
+                Some(b) => {
+                    if b {
                         self.visit_block_body(&if_expr.body);
                         return;
                     }
                 },
-                s => {
-                    let message = format!("expected a 'bool' type in if condition but got: {}", s.sym_hash(&self.symbol_table).unwrap());
+                None => {
+                    let message = format!("expected a boolean value in if condition but got: {}", cond_value.ty);
                     panic!(message);
                 },
             }
@@ -850,18 +795,6 @@ impl Evaluator for Interpreter {
 
     fn visit_match(&mut self, match_node: &Match) {
         panic!("unimplemented visit_match");
-        self.visit_expression(&match_node.expr);
-        let target_sym_id = self.last_local.take().unwrap();
-        let target_sym = self.symbol_table.load_symbol(target_sym_id);
-        let target_sym_readable = target_sym.read().unwrap();
-
-        for pattern in match_node.patterns.iter() {
-            self.visit_expression(&pattern.to_match);
-            let to_match_sym_id = self.last_local.take().unwrap();
-            let to_match_sym = self.symbol_table.load_symbol(to_match_sym_id);
-
-            
-        }
     }
 
     fn visit_loop(&mut self, loop_node: &Loop) {
@@ -872,16 +805,13 @@ impl Evaluator for Interpreter {
        
         let condition_checker = |interp: &mut Interpreter| {
             interp.visit_expression(&loop_node.condition);
-            let cond_sym_id = interp.last_local.take().unwrap();
-            let cond_sym = interp.symbol_table.load_symbol(cond_sym_id);
-            let cond_sym_readable = cond_sym.read().unwrap();
-            return match cond_sym_readable.deref() {
-                Symbol::Value(Value::BooleanValue(b)) => *b,
-                _ => {
-                    let cond_sym_ty = interp.symbol_table.load_symbol(cond_sym_readable.get_type());
-                    panic!("expected loop condition to be a 'bool' but got {}",
-                            cond_sym_ty.read().unwrap().sym_hash(&interp.symbol_table).unwrap());
-                },
+            let cond_value = interp.stack.pop().unwrap();
+            match cond_value.to_bool() {
+                Some(b) => *b,
+                None => {
+                    let message = format!("expected a boolean value in loop condition but got: {}", cond_value.ty);
+                    panic!(message);
+                }
             }
         };
 
@@ -895,404 +825,232 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_field_access(&mut self, field_access: &FieldAccess) {
-        let to_access_sym_id = self.last_local.take().unwrap();
-        let to_access = self.symbol_table.load_symbol(to_access_sym_id);
+        let to_access_value = self.stack.pop().unwrap();
+        let reference = match to_access_value {
+            Value::Reference(reference) => reference,
+            Value::Scalar(_) => {
+                let message = format!("trying to use field access syntax on a scalar");
+                panic!(message);
+            }
+        };
 
-        let readable_to_access = to_access.read().unwrap();
-        match readable_to_access.deref() {
-            Symbol::SelfVariable(sym_id) => {
-                // self variables can access fields and call methods
-                let oi_sym = self.symbol_table.load_symbol(*sym_id);
-                let oi_sym_readable = oi_sym.read().unwrap();
-                if let Symbol::ObjectInstance(oi) = oi_sym_readable.deref() {
-                    match oi.field_values.get(&field_access.field_name) {
-                        Some(v) => {
-                            self.last_local = Some(*v);
+        let item = self.heap.load(reference.address);
+
+        match item {
+            Item::ObjectInstance(oi_arc) => {
+                let oi_readable = oi_arc.read().unwarp();
+                let obj = self.kind_table.load(oi_readable.ty);
+
+                if reference.is_self {
+                    if let Some(v) = oi_readable.fields.get(&field_access.field_name) {
+                            self.stack.push(Value::clone(v));
                             return;
-                        },
-                        None => (),
                     }
 
-                    let obj = self.symbol_table.load_symbol(oi.ty);
-                    let obj_readable = obj.read().unwrap();
-                    if let Symbol::Object(o) = obj_readable.deref() {
-                        match o.methods.get(&field_access.field_name) {
-                            Some(func_id) => {
-                                let self_sym = Symbol::SelfVariable(to_access_sym_id);
-                                let self_sym_id = self.symbol_table.new_symbol(self_sym);
-                                let func_invoc = FunctionInvocation {
-                                    func_id: *func_id,
-                                    args: vec![self_sym_id],
-                                };
-                                let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
-                                self.last_local = Some(sym_id);
-                                return;
-                            },
-                            None => (),
-                        }
+                    // we want to check methods here becuase a reference that is both self and
+                    // has a contract_ty, it can still access regular methods
+                    if let Some(func) = self.get_obj_method_with_name(obj, field_access.field_name) {
+                        // TODO -> push func reference
+                        // TODO -> push self reference
                     }
-
-                    panic!("self variable of type: {} does not have field or method with name: {}",
-                           obj_readable.sym_hash(&self.symbol_table).unwrap(),
-                           field_access.field_name);
-                } else {
-                    // TODO -> we also need Enums
-                    panic!("expected self variable to point to an ObjectInstance but got {}",
-                           oi_sym_readable.sym_hash(&self.symbol_table).unwrap());
                 }
-            },
-            Symbol::ObjectInstance(oi) => {
-                // only methods can be called on object instances that aren't self
-                let obj_sym = self.symbol_table.load_symbol(oi.ty);
-                let obj_sym_readable = obj_sym.read().unwrap();
-                let obj = match obj_sym_readable.deref() {
-                    Symbol::Object(o) => o,
-                    s => panic!("COMPILER BUG: parent of ObjectInstance must be an object but got {}", s.sym_hash(&self.symbol_table).unwrap()),
-                };
 
-                if let Some(c_id) = oi.contract_ty {
-                    let vtable_id = match obj.vtables.get(&c_id) {
-                        Some(vt) => vt,
-                        None => {
-                            let message = format!("COMPILER BUG: contract_ty field of Object {} is populated but does not contain vtable",
-                                                  obj.sym_hash(&self.symbol_table).unwrap());
-                            panic!(message);
-                        },
-                    };
-
-                    let vtable = self.vtables.load_vtable(*vtable_id);
-                    let vtable_readable = vtable.read().unwrap();
-                    match vtable_readable.functions.get(&field_access.field_name) {
-                        Some(func_id) => {
-                            let self_sym = Symbol::SelfVariable(to_access_sym_id);
-                            let self_sym_id = self.symbol_table.new_symbol(self_sym);
-                            let func_invoc = FunctionInvocation {
-                                func_id: *func_id,
-                                args: vec![self_sym_id],
-                            };
-                            let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
-                            self.last_local = Some(sym_id);
-                            return;
-                        },
-                        None => {
-                            let contract_sym = self.symbol_table.load_symbol(c_id);
-                            let message = format!("unknown method '{}' of object: {}.",
-                                                  field_access.field_name,
-                                                  contract_sym.read().unwrap().sym_hash(&self.symbol_table).unwrap());
-                            panic!(message);
-                        },
-                    }
-                } else {
-                    match obj.methods.get(&field_access.field_name) {
-                        Some(func_id) => {
-                            let self_sym = Symbol::SelfVariable(to_access_sym_id);
-                            let self_sym_id = self.symbol_table.new_symbol(self_sym);
-                            let func_invoc = FunctionInvocation {
-                                func_id: *func_id,
-                                args: vec![self_sym_id],
-                            };
-                            let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
-                            self.last_local = Some(sym_id);
-                            return;
-                        },
-                        None => (),
-                    }
-
-                    for (_, vtable_id) in obj.vtables.iter() {
-                        let vtable = self.vtables.load_vtable(*vtable_id);
-                        let vtable_readable = vtable.read().unwrap();
-                        match vtable_readable.functions.get(&field_access.field_name) {
-                            Some(func_id) => {
-                                let self_sym = Symbol::SelfVariable(to_access_sym_id);
-                                let self_sym_id = self.symbol_table.new_symbol(self_sym);
-                                let func_invoc = FunctionInvocation {
-                                    func_id: *func_id,
-                                    args: vec![self_sym_id],
-                                };
-                                let sym_id = self.symbol_table.new_symbol(Symbol::FunctionInvocation(func_invoc));
-                                self.last_local = Some(sym_id);
-                                return;
-                            },
-                            None => (),
-                        }
-                    }
-
-                    let message = format!("unknown method '{}' of object: {}.",
-                                      field_access.field_name,
-                                      obj.sym_hash(&self.symbol_table).unwrap());
-                    panic!(message);
+                if let Some(contract_kind_hash) = oi_readable.contract_ty {
+                    // this object instance is acting as a contract and is nto self, we can only
+                    // access this contract's methods
+                    let vtable_id = obj.vtables.get(contract_kind_hash).unwrap();
+                    let vtable = self.vtables.load(vtable_id);
                 }
+
+                if let Some(func) = self.get_obj_method_with_name(obj, field_access.field_name) {
+                        // TODO -> push func reference
+                        // TODO -> push self reference
+                }
+
+                let message = format!("unknown method '{}' of object: {}.",
+                                  field_access.field_name,
+                                  obj.sym_hash(&self.symbol_table).unwrap());
+                panic!(message);
             },
-            // Symbol::DataInstance {
-            //     field access
-            // },
+            Item::EnumInstance(ei_arc) => {
+                // TODO ->
+                // find a method with name: field_access
+            },
             _ => {
-                let message = format!("trying to use object initialization syntax on something that isn't an object: {:?}", to_access);
+                let message = format!("trying to use dot access syntax on something that can't be accessed: {:?}", to_access);
                 panic!(message);
             }
         }
     }
 
     fn visit_module_access(&mut self, mod_access: &ModuleAccess) {
-        let to_access_sym_id = self.last_local.take().unwrap();
-        let to_access = self.symbol_table.load_symbol(to_access_sym_id);
-
-        let readable_to_access = to_access.read().unwrap();
-        match readable_to_access.deref() {
-            Symbol::Module(module) => {
-                panic!("MOD_ACCESS: {:?}", mod_access.name);
+        let to_access_value = self.stack.pop().unwrap();
+        let reference = match to_access_value {
+            Value::Reference(reference) => reference,
+            Value::Scalar(_) => {
+                let message = format!("trying to use field access syntax on a scalar");
+                panic!(message);
+            }
+        };
+        let item = self.heap.load(reference.address);
+        match item {
+            Item::ModuleReference(mod_hash) => {
+                unimplemented!("module access: {}", mod_hash);
             },
-            Symbol::Enum(enu) => {
-                // TODO -> this shouldn't be here. module declarations should create a special
-                // hidden module and then enum variant construction is just a function call in to
-                // this special function defined inside of a the hidden module
+            Item::TypeReference(kind_hash) => {
+                let kind = self.kind_table.load(kind_hash);
+                if let Some(enu) = kind.to_enum() {
+                    match enu.variant_values.get(&mod_access.name) {
+                        Some(addr)  => {
+                            let item = self.heap.load(addr);
+                            match item {
+                                Item::EnumInstance(ei_arc) => {
+                                    let addr = self.heap.alloc();
+                                    let ei_readable = ei_arc.read().unwrap();
+                                    let new_instance = EnumInstance::clone(ei_readable.deref());
+                                    let new_item = Item::EnumInstance(Arc::new(RwLock::new(new_instance)));
+                                    self.heap.store(addr, new_item);
+                                },
+                                Item::Function(func) => {
+                                    // first push the function reference
+                                    self.stack.push(func);
 
-                match enu.variant_funcs.get(&mod_access.name) {
-                    Some(Symbol::EnumInstance(ei)) => {
-                        let id = self.symbol_table.new_symbol(Symbol::EnumInstance(EnumInstance::clone(ei)));
-                        self.last_local = Some(id);
-                    },
-                    Some(Symbol::NativeFunction(func)) => {
-                        let mut cloned_func = func.clone();
-
-                        let ty = Expression::ChainableExpressionNode(
-                            Box::new(ChainableExpression {
-                                start: ExpressionStart::ValueNode(Value::IntegerValue(to_access_sym_id as i32)),
-                                chained: Vec::new(),
-                            })
-                        );
-
-                        let name = Expression::ChainableExpressionNode(
-                            Box::new(ChainableExpression {
-                                start: ExpressionStart::ValueNode(Value::StringValue(mod_access.name.clone())),
-                                chained: Vec::new(),
-                            })
-                        );
-                        
-                        let variant = enu.variants.get(&mod_access.name).unwrap();
-                        let does_contain = Expression::ChainableExpressionNode(
-                            Box::new(ChainableExpression {
-                                start: ExpressionStart::ValueNode(Value::BooleanValue(variant.is_some())),
-                                chained: Vec::new(),
-                            })
-                        );
-
-                        cloned_func.args = vec![
-                            ty,
-                            name,
-                            does_contain
-                        ];
-
-                        if let Some(contains_id) = variant {
-                            let contains = self.symbol_table.load_symbol(*contains_id);
-                            let contains_readable = contains.read().unwrap();
-                            let actually_contains_id = match contains_readable.deref() {
-                                Symbol::TypeVariable(maybe_id) => {
-                                    match maybe_id {
-                                        Some(id) => *id,
-                                        None => panic!("trying to get type variable out of hole"),
+                                    // first arg is kind_hash of the enum
+                                    // TODO -> make the kind_hash a heap allocated string?
+                                    self.stack.push();
+                                    
+                                    // second arg is the name of the variant
+                                    // TODO -> make the variant_name a heap allocated string?
+                                    self.stack.push();
+                                   
+                                    // third arg is whether it contains a type
+                                    let variant_ty = enu.varaint_tys.get(&mod_access.name).unwrap());
+                                    let does_contain_ty = variant_ty.is_some();
+                                    let third_arg = Value::Scalar(Scalar::Bool(does_contain_ty));
+                                    self.stack.push(third_arg);
+                                  
+                                    if does_contain_ty {
+                                        // fourth arg should be kind_hash it contains
+                                        let variant_kind_hash_value
+                                        self.stack.push(variant_kind_hash_value);
+                                   
+                                        // fifth arg gets pushed as part of the function application
+                                        
+                                        //push num args (4)
+                                        push 4
+                                    } else {
+                                        //push num args (3)
+                                        push 3
                                     }
                                 },
-                                _ => *contains_id,
-                            };
-                            let contain_ty = Expression::ChainableExpressionNode(
-                                Box::new(ChainableExpression {
-                                    start: ExpressionStart::ValueNode(Value::IntegerValue(actually_contains_id as i32)),
-                                    chained: Vec::new(),
-                                })
-                            );
-                            cloned_func.args.push(contain_ty);
+                                _ => unreachable!(),
+                            }
+                        },
+                        None => {
+                            let message = format!("Enum {} has no variant {}",
+                                          enu.sym_hash(&self.symbol_table).unwrap(),
+                                          mod_access.name);
+                            panic!(message);
                         }
-                    
-                        let id = self.symbol_table.new_symbol(Symbol::NativeFunction(cloned_func));
-                        self.last_local = Some(id);
-
-                    },
-                    Some(sym) => {
-                        let message = format!("COMILER BUG: Enum {} has variant {} but it is {} and not an EnumInstance or NativeFunction",
-                                              enu.sym_hash(&self.symbol_table).unwrap(),
-                                              mod_access.name,
-                                              sym.sym_hash(&self.symbol_table).unwrap());
-                        panic!(message);
                     }
-                    None => {
-                        let message = format!("Enum {} has no variant {}",
-                                              enu.sym_hash(&self.symbol_table).unwrap(),
-                                              mod_access.name);
-                        panic!(message);
-                    },
+                } else {
+                    let message = format!("trying to use module access syntax on something that isn't a module: {:?}",
+                                  item.get_ty());
                 }
             },
-            _ => {
-            let message = format!("trying to use module access syntax on something that isn't a module: {:?}",
-                                  readable_to_access.sym_hash(&self.symbol_table).unwrap());
-            }
         }
     }
 
     fn visit_object_initialization(&mut self, obj_init: &ObjectInitialization) {
-        let last_local_sym_id = self.last_local.take().unwrap();
-        let last_local = self.symbol_table.load_symbol(last_local_sym_id);
-
-        let readable_last_local = last_local.read().unwrap();
-
-        let obj_decl = if let Symbol::Object(obj_decl) = readable_last_local.deref() {
-            obj_decl
-        } else {
-            panic!(
-                "trying to initialize object on symbol that isn't an object: {:?}",
-                self.last_local
-            )
-        };
+        let value = self.stack.pop().unwrap();
+        let reference = value.to_reference();
+        let item = self.heap.load(reference.address);
+        let obj_hash = item.to_type_reference_hash();
+        let obj = self.kind_table.load(obj_hash);
 
         // TODO -> need to validate that the object init doesn't have any fields that aren't in the
         // object
 
         let mut field_values = HashMap::new();
-        for (field_name, expected_ty_id_input) in obj_decl.fields.iter() {
-            // ensure names of fields match
+        for (field_name, expected_ty) in obj.fields.iter() {
             if !obj_init.fields.contains_key(field_name) {
-                let msg = format!(
+                let message = format!(
                     "expected field '{}' in object initialization not present in {:?}",
                     field_name,
                     obj_init.fields.keys()
                 );
-                panic!(msg);
+                panic!(message);
             }
 
-            let mut expected_ty_id = expected_ty_id_input.clone();
-            let expected_ty = self.symbol_table.load_symbol(expected_ty_id);
-            if let Symbol::TypeVariable(maybe_tv_sym_id) = expected_ty.read().unwrap().deref() {
-                expected_ty_id = maybe_tv_sym_id.unwrap().clone();
-            }
+            // TODO -> need to resolve type variables to their actual type?
 
-            let field_expr = obj_init.fields.get(field_name).unwrap();
-            self.visit_expression(&field_expr);
-            let evaluated_id = self.last_local.take().unwrap();
-            let evaluated = self.symbol_table.load_symbol(evaluated_id);
-            if evaluated.read().unwrap().get_type() != expected_ty_id {
-                let expected_ty = self.symbol_table.load_symbol(expected_ty_id);
-                let evaluated_ty = self.symbol_table.load_symbol(evaluated.read().unwrap().get_type());
-
-                let msg = format!(
+            let field_expr = obj_init.fields.get(field_name).unrwap();
+            self.visit_expression(field_expr);
+            let field_value = self.stack.pop().unwrap();
+            if field_value.get_ty() != expected_ty {
+                let message = format!(
                     "expected field '{}' in object initialization to be type '{}' but got '{}'",
                     field_name,
-                    expected_ty.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
-                    evaluated_ty.read().unwrap().sym_hash(&self.symbol_table).unwrap(),
+                    expected_ty,
+                    field_value.get_ty(),
                 );
-                panic!(msg);
+                panic!(message);
             }
-            field_values.insert(field_name.clone(), evaluated_id);
+
+            field_values.insert(field_name.clone(), field_value);
         }
 
-        let initialized_object = ObjectInstance {
-            ty: last_local_sym_id,
+        let obj_instance = ObjectInstance {
+            ty: obj_hash,
             contract_ty: None,
             field_values,
         };
 
-        let sym_id = self
-            .symbol_table
-            .new_symbol(Symbol::ObjectInstance(initialized_object));
-        self.last_local = Some(sym_id);
+        let address = self.heap.alloc();
+        self.heap.store(address, Item::ObjectInstance(obj_instance));
+        let reference = Reference {
+            ty: obj_hash,
+            is_self: false,
+            address,
+            size: std::u32::MAX,
+        };
+        let value = Value::Reference(reference);
+        self.stack.push(value);
     }
 
     fn visit_function_application(&mut self, func_app: &FunctionApplication) {
+        let to_apply_to_value = self.stack.pop().unwrap();
+        let reference = match to_apply_to_value {
+            Value::Reference(reference) => {
 
-        let last_local_sym_id = self.last_local.take().unwrap();
-        let last_local = self.symbol_table.load_symbol(last_local_sym_id);
-        
-        // TODO -> Clean this up. duplicated code but dont have a nice abstraction
-        let last_local_readable = last_local.read().unwrap();
-        match last_local_readable.deref() {
-            Symbol::Function(func) => {
-                let args = func_app.args
-                    .iter()
-                    .map(|expr| {
-                        self.visit_expression(expr);
-                        self.last_local.take().unwrap()
-                    })
-                    .collect();
-
-                let result_sym_id = func.call(self, args);
-
-                let signature_sym = self.symbol_table.load_symbol(func.signature);
-                let signature_sym_readable = signature_sym.read().unwrap();
-                let signature = if let Symbol::FunctionSignature(sig) = signature_sym_readable.deref() {
-                    sig
-                } else {
-                    let message = format!("COMPILER ERROR: expected FunctionSignature but got {}", signature_sym_readable.sym_hash(&self.symbol_table).unwrap());
-                    panic!(message);
-                };
-
-                if let Some(ref _ret_type) = signature.returns {
-                    // TODO -> type check return value
-                    self.last_local = Some(result_sym_id.unwrap());
-                }
             },
-            Symbol::NativeFunction(native_func) => {
-                let all_args = vec![
-                        native_func.args.clone(),
-                        func_app.args.clone()]
-                    .concat()
-                    .iter()
-                    .map(|expr| {
-                        self.visit_expression(expr);
-                        self.last_local.take().unwrap()
-                    })
-                    .collect();
-
-                let result_sym_id = native_func.call(self, all_args);
-
-                if let Some(sym_id) = result_sym_id {
-                    // TODO -> type check return value
-                    self.last_local = Some(sym_id);
-                }
-            },
-            Symbol::FunctionInvocation(fi) => {
-                let new_args = func_app.args
-                    .iter()
-                    .map(|expr| {
-                        self.visit_expression(expr);
-                        self.last_local.take().unwrap()
-                    })
-                    .collect();
-
-                let actual_args = [
-                    fi.args.clone(),
-                    new_args,
-                ].concat();
-
-                let func_sym = self.symbol_table.load_symbol(fi.func_id);
-                let func_sym_readable = func_sym.read().unwrap();
-                match func_sym_readable.deref() {
-                    Symbol::Function(func) => {
-                        let signature_sym = self.symbol_table.load_symbol(func.signature);
-                        let signature_sym_readable = signature_sym.read().unwrap();
-                        let signature = if let Symbol::FunctionSignature(sig) = signature_sym_readable.deref() {
-                            sig
-                        } else {
-                            let message = format!("COMPILER ERROR: expected FunctionSignature but got {}", signature_sym_readable.sym_hash(&self.symbol_table).unwrap());
-                            panic!(message);
-                        };
-
-                        let result_sym_id = func.call(self, actual_args);
-                        if let Some(ref _ret_type) = signature.returns {
-                            // TODO -> type check return value
-                            self.last_local = Some(result_sym_id.unwrap());
-                        }
-                    },
-                    s => {
-                        let message = format!("COMPILER BUG: function invocation not pointing to a function, pointing to: {}",
-                                              s.sym_hash(&self.symbol_table).unwrap());
-                        panic!(message);
-                    },
-                }
+            v => {
+                let message = format!("expected to apply to a reference but got: {}", v);
+                panic!(message)
             }
-            sym => {
-                panic!("attempting to apply arguments to {} which isn't a function",
-                          sym.sym_hash(&self.symbol_table).unwrap());
-            },
+        };
+
+        let to_apply_to_item = self.heap.load(reference.address);
+
+        let func = match to_apply_to_item.to_func() {
+            Some(f) => f,
+            None => {
+                let message = format!("trying to call something that isn't a function: {}", to_apply_to_item);
+                panic!(message);
+            }
+        };
+
+        func_app.args
+            .iter()
+            .for_each(Self::visit_expression);
+
+        // TODO -> type_check args?
+        
+        let result = func.call(self);
+
+        // TODO -> check signature to see if returns
+        if let Some(ret_type) = signature.returns {
+            self.stack.push(result.unwrap());
         }
     }
 
@@ -1446,46 +1204,43 @@ impl Evaluator for Interpreter {
 
     fn visit_binary_operation(&mut self, bin_op: &BinaryOperation) {
         use BinaryOperator::*;
+        use Scalar::*;
 
-        let lhs_sym_id = self.last_local.take().unwrap();
-        let lhs = self.symbol_table.load_symbol(lhs_sym_id);
-        let lhs = match lhs.read().unwrap().deref() {
-            Symbol::Value(val) => val.clone(),
+        let lhs_value = self.stack.pop().unwrap();
+        let lhs = match lhs_value {
+            Value::Scalar(scalar) => scalar,
             other => panic!(format!(
-                "lhs of binary operation needs to be a value but was {:?}",
+                "expected lhs of binary operation to be a scalar but was {:?}",
                 other
             )),
         };
 
         self.visit_expression(&bin_op.rhs);
-
-        let rhs_sym_id = self.last_local.take().unwrap();
-        let rhs = self.symbol_table.load_symbol(rhs_sym_id);
-        let rhs = match rhs.read().unwrap().deref() {
-            Symbol::Value(val) => val.clone(),
+        let rhs_value = self.stack.pop().unwrap();
+        let rhs = match rhs_value {
+            Value::Scalar(scalar) => scalar,
             other => panic!(format!(
-                "rhs of binary operation needs to be a value but was {:?}",
+                "expected rhs of binary operation to be a scalar but was {:?}",
                 other
-            )),
+            )), 
         };
 
         let result = match bin_op.op {
-            Plus =>               Symbol::Value(Value::add(lhs, rhs)),
-            Minus =>              Symbol::Value(Value::subtract(lhs, rhs)),
-            Multiply =>           Symbol::Value(Value::multiply(lhs, rhs)),
-            Divide =>             Symbol::Value(Value::divide(lhs, rhs)),
-            LessThan =>           Symbol::Value(Value::less_than(lhs, rhs)),
-            LessThanOrEqual =>    Symbol::Value(Value::less_than_or_equal(lhs, rhs)),
-            GreaterThan =>        Symbol::Value(Value::greater_than(lhs, rhs)),
-            GreaterThanOrEqual => Symbol::Value(Value::greater_than_or_equal(lhs, rhs)),
-            Equal =>              Symbol::Value(Value::equal_to(lhs, rhs)),
-            NotEqual =>           Symbol::Value(Value::not_equal_to(lhs, rhs)),
-            Or =>                 Symbol::Value(Value::or(lhs, rhs)),
-            And =>                Symbol::Value(Value::and(lhs, rhs)),
+            Plus =>               Value::Scalar(add(lhs, rhs)),
+            Minus =>              Value::Scalar(subtract(lhs, rhs)),
+            Multiply =>           Value::Scalar(multiply(lhs, rhs)),
+            Divide =>             Value::Scalar(divide(lhs, rhs)),
+            LessThan =>           Value::Scalar(less_than(lhs, rhs)),
+            LessThanOrEqual =>    Value::Scalar(less_than_or_equal(lhs, rhs)),
+            GreaterThan =>        Value::Scalar(greater_than(lhs, rhs)),
+            GreaterThanOrEqual => Value::Scalar(greater_than_or_equal(lhs, rhs)),
+            Equal =>              Value::Scalar(equal_to(lhs, rhs)),
+            NotEqual =>           Value::Scalar(not_equal_to(lhs, rhs)),
+            Or =>                 Value::Scalar(or(lhs, rhs)),
+            And =>                Value::Scalar(and(lhs, rhs)),
         };
 
-        let sym_id = self.symbol_table.new_symbol(result);
-        self.last_local = Some(sym_id);
+        self.stack.push(result);
     }
 }
 
@@ -1502,7 +1257,7 @@ impl Callable<Interpreter> for Enum {
 }
 
 impl Callable<Interpreter> for Function {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<SymbolId>) -> Option<SymbolId> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         let signature_sym = interpreter.symbol_table.load_symbol(self.signature);
         let signature_sym_readable = signature_sym.read().unwrap();
         let signature = if let Symbol::FunctionSignature(sig) = signature_sym_readable.deref() {
@@ -1547,7 +1302,7 @@ impl Callable<Interpreter> for Function {
 }
 
 impl Callable<Interpreter> for NativeFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<SymbolId>) -> Option<SymbolId> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         (self.func)(interpreter, args)
     }
 }

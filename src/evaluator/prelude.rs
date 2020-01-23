@@ -1,29 +1,29 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
-use super::evaluator::{Evaluator, SymbolTable, SymbolId, Symbol, ValueType, NativeFunction};
+use super::evaluator::{Evaluator, NativeFunction};
 use crate::evaluator::interpreter::Interpreter;
 use crate::syntax::parse_tree::{Expression, Value};
 
-pub(super) fn prelude(symbol_table: &mut SymbolTable) -> HashMap<String, SymbolId> {
+pub(super) fn prelude(kind_table: &mut KindTable) -> HashMap<String, KindId> {
     let mut env = HashMap::new();
 
-    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::BooleanType), SymbolTable::BOOL_TYPE_SYMBOL_ID);
-    env.insert("bool".into(), SymbolTable::BOOL_TYPE_SYMBOL_ID);
+    kind_table.new_symbol_with_id(Kind::ValueType(ValueType::BooleanType), KindTable::BOOL_TYPE_SYMBOL_ID);
+    env.insert("bool".into(), KindTable::BOOL_TYPE_SYMBOL_ID);
 
-    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::CharType), SymbolTable::CHAR_TYPE_SYMBOL_ID);
-    env.insert("char".into(), SymbolTable::CHAR_TYPE_SYMBOL_ID);
+    kind_table.new_symbol_with_id(Kind::ValueType(ValueType::CharType), KindTable::CHAR_TYPE_SYMBOL_ID);
+    env.insert("char".into(), KindTable::CHAR_TYPE_SYMBOL_ID);
 
-    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::StringType), SymbolTable::STRING_TYPE_SYMBOL_ID);
-    env.insert("string".into(), SymbolTable::STRING_TYPE_SYMBOL_ID);
+    kind_table.new_symbol_with_id(Kind::ValueType(ValueType::StringType), KindTable::STRING_TYPE_SYMBOL_ID);
+    env.insert("string".into(), KindTable::STRING_TYPE_SYMBOL_ID);
 
-    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::IntegerType), SymbolTable::INT_TYPE_SYMBOL_ID);
-    env.insert("int".into(), SymbolTable::INT_TYPE_SYMBOL_ID);
+    kind_table.new_symbol_with_id(Kind::ValueType(ValueType::IntegerType), KindTable::INT_TYPE_SYMBOL_ID);
+    env.insert("int".into(), KindTable::INT_TYPE_SYMBOL_ID);
 
-    symbol_table.new_symbol_with_id(Symbol::ValueType(ValueType::FloatType), SymbolTable::FLOAT_TYPE_SYMBOL_ID);
-    env.insert("float".into(), SymbolTable::FLOAT_TYPE_SYMBOL_ID);
+    kind_table.new_symbol_with_id(Kind::ValueType(ValueType::FloatType), KindTable::FLOAT_TYPE_SYMBOL_ID);
+    env.insert("float".into(), KindTable::FLOAT_TYPE_SYMBOL_ID);
 
-    let print_symbol_id = symbol_table.new_symbol(Symbol::NativeFunction(print_nat_fn()));
+    let print_symbol_id = kind_table.new_symbol(Kind::NativeFunction(print_nat_fn()));
     env.insert("print".into(), print_symbol_id);
 
     env
@@ -33,7 +33,7 @@ fn print_nat_fn() -> NativeFunction {
     NativeFunction {
         name: "print".into(),
         args: Vec::new(),
-        func: |interp: &mut Interpreter, args: Vec<SymbolId>| {
+        func: |interp: &mut Interpreter, args: Vec<Value>| {
             if args.len() != 1 {
                 let message = format!(
                     "invalid number of parameters function call. expected 1, got {}",
@@ -42,12 +42,12 @@ fn print_nat_fn() -> NativeFunction {
                 panic!(message);
             }
 
-            let result_sym_id = args.iter().nth(0).unwrap();
-            let result = interp.symbol_table.load_symbol(*result_sym_id);
+            let value = args[0];
+            let result = interp.kind_table.load_symbol(*result_sym_id);
 
             let readable_result = result.read().unwrap();
             match readable_result.deref() {
-                Symbol::Value(Value::StringValue(s)) => {
+                Kind::Value(Value::StringValue(s)) => {
                     println!("{}", s);
                     None
                 }

@@ -33,20 +33,21 @@ use std::sync::{Arc, RwLock};
 //          collection and/or static allocations )
 //  ( Should I have a syntax construct like Zig's "comptime" )?
 
-#[derive(Clone)]
-enum Value {
+#[derive(Clone, Debug)]
+pub(crate) enum Value {
     Reference(Reference),
     Scalar(Scalar),
 }
 
-struct Reference {
+#[derive(Clone, Debug)]
+pub(crate) struct Reference {
     ty: KindHash,
     is_self: bool,
     address: Address,
     size: u32,
 }
 
-enum Item {
+pub(crate) enum Item {
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
     Function(Function),
@@ -67,8 +68,8 @@ impl Clone for Item {
     }
 }
 
-#[derive(Clone)]
-enum Scalar {
+#[derive(Clone, Debug)]
+pub(crate) enum Scalar {
     Boolean(bool),
     Integer(i32),
     Long(i64),
@@ -117,6 +118,13 @@ impl Value {
         match self {
             Scalar::Char(c) => Some(*c),
             _ => None
+        }
+    }
+
+    fn to_reference(&self) -> Option<Reference> {
+        match self {
+            Value::Reference(r) => Some(r),
+            _ => None,
         }
     }
 
@@ -223,7 +231,7 @@ impl Value {
 type Address = u32;
 
 // heap contains item
-struct Heap {
+pub(crate) struct Heap {
     next_address: Address,
     items: HashMap<Address, Item>,
 }
@@ -276,19 +284,7 @@ impl Heap {
         }
     }
 
-    pub fn load_contract_instance(&self, addr: Address) -> Option<Arc<RwLock<ContractInstance>>> {
-        match self.load(addr) {
-            Some(item) => {
-                match item {
-                    Item::ContractInstance(ref ci_arc) => Some(Arc::clone(ci_arc)),
-                    _ => None,
-                }
-            },
-            None => None
-        }
-    }
-
-    pub fn load_type_reference(&self, addr: Address) -> KindHash {
+    pub fn load_type_reference(&self, addr: Address) -> Option<KindHash> {
         match self.load(addr) {
             Some(item) => {
 
@@ -298,7 +294,7 @@ impl Heap {
     }
 }
 
-enum Kind {
+pub(crate) enum Kind {
     Object(Object),
     Enum(Enum),
     Contract(Contract),
@@ -308,23 +304,21 @@ enum Kind {
     Type(KindHash), // probably want this to be different. probably want a table of type equivalence
 }
 
-type KindHash = String;
+pub(crate) type KindHash = String;
 
-trait KindHashable {
+pub(crate) trait KindHashable {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash;
 }
 
 impl KindHashable for Kind {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        use Kind::*;
-
         match self {
-            Object(o) => o.kind_hash(kind_table),
-            Enum(e) => e.kind_hash(kind_table),
-            Contract(c) => c.kind_hash(kind_table),
-            Module(m) => m.kind_hash(kind_table),
-            Function(f) => f.kind_hash(kind_table),
-            Type(k_id) => {
+            Kind::Object(o) => o.kind_hash(kind_table),
+            Kind::Enum(e) => e.kind_hash(kind_table),
+            Kind::Contract(c) => c.kind_hash(kind_table),
+            Kind::Module(m) => m.kind_hash(kind_table),
+            Kind::Function(f) => f.kind_hash(kind_table),
+            Kind::Type(k_id) => {
                 let kind = kind_table.load(k_id);
                 kind.kind_hash(kind_table)
             }
@@ -452,7 +446,7 @@ impl KindHashable for Function {
             Some(id) => {
                 let return_sym = kind_table.load(id);
                 let return_sym_readable = return_sym.read().unwrap();
-                let hash = return_sym_readable.sym_hash(kind_table).unwrap();
+                let hash = return_sym_readable.kind_hash(kind_table).unwrap();
 
                 format!(" -> {}", hash)
             },
@@ -465,8 +459,12 @@ impl KindHashable for Function {
     }
 }
 
-struct KindTable {
+pub(crate) struct KindTable {
     kinds: HashMap<KindHash, Arc<RwLock<Kind>>>,
+}
+
+impl KindTable {
+
 }
 
 pub(crate) type VTableId = u32;
@@ -556,107 +554,107 @@ impl Environment {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum Symbol {
-    Module(Module),
-    Contract(Contract),
-    Object(Object),
-    ObjectInstance(ObjectInstance),
-    Enum(Enum),
-    EnumInstance(EnumInstance),
-    SelfVariable(SymbolId),
-    FunctionSignature(FunctionSignature),
-    Function(Function),
-    NativeFunction(NativeFunction),
-    ValueType(ValueType),
-    Value(Value),
-    TypeVariable(Option<SymbolId>),
-}
-
-// i need a way for Option<<Int>> here
-// and Option<<Int>> here to both result
-// in the same type id. this gets more
-// complicated when modules are involved
-// to do this we need the fully qualified module/object
-// path and the same for all of its type arguments
-
-impl Symbol {
-    // get_size(&mut self) -> u64;
-    // defined_at(&mut self) -> Span;
-
-    pub fn get_type(&self) -> SymbolId {
-        match self {
-            Symbol::Object(_) => {
-                SymbolTable::OBJECT_TYPE_SYMBOL_ID
-            },
-            Symbol::ObjectInstance(oi) => {
-                oi.ty.clone()
-            },
-            Symbol::Enum(_) => {
-                SymbolTable::ENUM_TYPE_SYMBOL_ID
-            },
-            Symbol::EnumInstance(ei) => {
-                ei.ty.clone()
-            },
-            Symbol::Function(_) => {
-                SymbolTable::UNDEFINED_SYMBOL_ID
-            },
-            Symbol::NativeFunction(_) => {
-                SymbolTable::UNDEFINED_SYMBOL_ID
-            },
-            Symbol::ValueType(_) => {
-                SymbolTable::VALUE_TYPE_SYMBOL_ID
-                
-            },
-            Symbol::Value(v) => {
-                match v {
-                    Value::StringValue(_)  => SymbolTable::STRING_TYPE_SYMBOL_ID,
-                    Value::IntegerValue(_) => SymbolTable::INT_TYPE_SYMBOL_ID,
-                    Value::FloatValue(_)   => SymbolTable::FLOAT_TYPE_SYMBOL_ID,
-                    Value::CharValue(_)    => SymbolTable::CHAR_TYPE_SYMBOL_ID,
-                    Value::BooleanValue(_) => SymbolTable::BOOL_TYPE_SYMBOL_ID,
-                }
-            },
-            Symbol::TypeVariable(_) => {
-                SymbolTable::UNDEFINED_SYMBOL_ID
-            }
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn is_type_variable(&self) -> bool {
-        match self {
-            Symbol::TypeVariable(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_unbound_type_variable(&self) -> bool {
-        match self {
-            Symbol::TypeVariable(Some(_)) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_a(lower_id: SymbolId, upper_id: SymbolId, table: &SymbolTable) -> bool {
-        if lower_id == upper_id {
-            return true;
-        }
-
-        let lower = table.load_symbol(lower_id);
-        let lower_readable = lower.read().unwrap();
-
-        match lower_readable.deref() {
-            Symbol::Object(o) => {
-                o.vtables.contains_key(&upper_id)
-            },
-            Symbol::Enum(e) => {
-                e.vtables.contains_key(&upper_id)
-            },
-            _ => false,
-        }
-    }
-}
+// #[derive(Clone, Debug)]
+// pub(crate) enum Symbol {
+//     Module(Module),
+//     Contract(Contract),
+//     Object(Object),
+//     ObjectInstance(ObjectInstance),
+//     Enum(Enum),
+//     EnumInstance(EnumInstance),
+//     SelfVariable(SymbolId),
+//     FunctionSignature(FunctionSignature),
+//     Function(Function),
+//     NativeFunction(NativeFunction),
+//     ValueType(ValueType),
+//     Value(Value),
+//     TypeVariable(Option<SymbolId>),
+// }
+// 
+// // i need a way for Option<<Int>> here
+// // and Option<<Int>> here to both result
+// // in the same type id. this gets more
+// // complicated when modules are involved
+// // to do this we need the fully qualified module/object
+// // path and the same for all of its type arguments
+// 
+// impl Symbol {
+//     // get_size(&mut self) -> u64;
+//     // defined_at(&mut self) -> Span;
+// 
+//     pub fn get_type(&self) -> SymbolId {
+//         match self {
+//             Symbol::Object(_) => {
+//                 SymbolTable::OBJECT_TYPE_SYMBOL_ID
+//             },
+//             Symbol::ObjectInstance(oi) => {
+//                 oi.ty.clone()
+//             },
+//             Symbol::Enum(_) => {
+//                 SymbolTable::ENUM_TYPE_SYMBOL_ID
+//             },
+//             Symbol::EnumInstance(ei) => {
+//                 ei.ty.clone()
+//             },
+//             Symbol::Function(_) => {
+//                 SymbolTable::UNDEFINED_SYMBOL_ID
+//             },
+//             Symbol::NativeFunction(_) => {
+//                 SymbolTable::UNDEFINED_SYMBOL_ID
+//             },
+//             Symbol::ValueType(_) => {
+//                 SymbolTable::VALUE_TYPE_SYMBOL_ID
+//                 
+//             },
+//             Symbol::Value(v) => {
+//                 match v {
+//                     Value::StringValue(_)  => SymbolTable::STRING_TYPE_SYMBOL_ID,
+//                     Value::IntegerValue(_) => SymbolTable::INT_TYPE_SYMBOL_ID,
+//                     Value::FloatValue(_)   => SymbolTable::FLOAT_TYPE_SYMBOL_ID,
+//                     Value::CharValue(_)    => SymbolTable::CHAR_TYPE_SYMBOL_ID,
+//                     Value::BooleanValue(_) => SymbolTable::BOOL_TYPE_SYMBOL_ID,
+//                 }
+//             },
+//             Symbol::TypeVariable(_) => {
+//                 SymbolTable::UNDEFINED_SYMBOL_ID
+//             }
+//             _ => unimplemented!(),
+//         }
+//     }
+// 
+//     pub fn is_type_variable(&self) -> bool {
+//         match self {
+//             Symbol::TypeVariable(_) => true,
+//             _ => false,
+//         }
+//     }
+// 
+//     pub fn is_unbound_type_variable(&self) -> bool {
+//         match self {
+//             Symbol::TypeVariable(Some(_)) => true,
+//             _ => false,
+//         }
+//     }
+// 
+//     pub fn is_a(lower_id: SymbolId, upper_id: SymbolId, table: &SymbolTable) -> bool {
+//         if lower_id == upper_id {
+//             return true;
+//         }
+// 
+//         let lower = table.load_symbol(lower_id);
+//         let lower_readable = lower.read().unwrap();
+// 
+//         match lower_readable.deref() {
+//             Symbol::Object(o) => {
+//                 o.vtables.contains_key(&upper_id)
+//             },
+//             Symbol::Enum(e) => {
+//                 e.vtables.contains_key(&upper_id)
+//             },
+//             _ => false,
+//         }
+//     }
+// }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Module {
@@ -723,20 +721,20 @@ impl FunctionSignature {
         }
 
         for ((n1, s1), (n2, s2)) in self.type_parameters.iter().zip(other.type_parameters.iter()) {
-            if !Symbol::is_a(*s2, *s1, table) {
+            if !Kind::is_a(*s2, *s1, table) {
                 return false;
             }
         }
 
         for ((n1, s1), (n2, s2)) in self.parameters.iter().zip(other.parameters.iter()) {
-            if !Symbol::is_a(*s2, *s1, table) {
+            if !Kind::is_a(*s2, *s1, table) {
                 return false;
             }
         }
 
         if let Some(ret_id) = self.returns {
             if let Some(other_ret_id) = other.returns {
-                return Symbol::is_a(other_ret_id, ret_id, table);
+                return Kind::is_a(other_ret_id, ret_id, table);
             } else {
                 return false;
             }
@@ -746,15 +744,15 @@ impl FunctionSignature {
     }
 }
 
-impl SymHash for FunctionSignature {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
+impl KindHashable for FunctionSignature {
+    fn kind_hash(&self, table: &KindTable) -> Option<String> {
         let type_params = if !self.type_parameters.is_empty() {
             let tp_str = self.type_parameters
                 .iter()
                 .map(|(n, id)| {
-                    let sym = table.load_symbol(*id);
+                    let sym = table.load(*id);
                     let sym_readable = sym.read().unwrap();
-                    sym_readable.sym_hash(table).unwrap()
+                    sym_readable.kind_hash(table).unwrap()
                 })
                 .collect::<Vec<String>>()
                 .join(", ");
@@ -768,9 +766,9 @@ impl SymHash for FunctionSignature {
             self.parameters
                 .iter()
                 .map(|(n, id)| {
-                    let sym = table.load_symbol(*id);
+                    let sym = table.load(*id);
                     let sym_readable = sym.read().unwrap();
-                    sym_readable.sym_hash(table).unwrap()
+                    sym_readable.kind_hash(table).unwrap()
                 })
                 .collect::<Vec<String>>()
                 .join(", ")
@@ -780,9 +778,9 @@ impl SymHash for FunctionSignature {
 
         let returns = match self.returns {
             Some(id) => {
-                let return_sym = table.load_symbol(id);
+                let return_sym = table.load(id);
                 let return_sym_readable = return_sym.read().unwrap();
-                let hash = return_sym_readable.sym_hash(table).unwrap();
+                let hash = return_sym_readable.kind_hash(table).unwrap();
 
                 format!(" -> {}", hash)
             },
@@ -802,19 +800,19 @@ pub(crate) struct Function {
     pub environment: Arc<RwLock<Environment>>,
 }
 
-impl SymHash for Function {
-    fn sym_hash(&self, table: &SymbolTable) -> Option<String> {
-        let parent = table.load_symbol(self.parent);
+impl KindHashable for Function {
+    fn kind_hash(&self, table: &KindTable) -> Option<String> {
+        let parent = table.load(self.parent);
 
         let parent_hash = match parent.read().unwrap().deref() {
-            Symbol::Module(ref m) => m.sym_hash(table).unwrap(),
-            Symbol::Object(ref o) => o.sym_hash(table).unwrap(),
-            Symbol::Enum(ref e)   => e.sym_hash(table).unwrap(),
+            Kind::Module(ref m) => m.kind_hash(table).unwrap(),
+            Kind::Object(ref o) => o.kind_hash(table).unwrap(),
+            Kind::Enum(ref e)   => e.kind_hash(table).unwrap(),
             _ => unreachable!(),
         };
 
         let signature = table.load_symbol(self.signature);
-        let sig_hash = signature.read().unwrap().sym_hash(table).unwrap();
+        let sig_hash = signature.read().unwrap().kind_hash(table).unwrap();
 
         Some([parent_hash, sig_hash].join("::"))
     }

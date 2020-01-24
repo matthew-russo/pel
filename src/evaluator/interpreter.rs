@@ -306,10 +306,11 @@ impl Evaluator for Interpreter {
             .methods
             .iter()
             .map(|fd| {
-                self.last_local = Some(enu_sym_id);
+                self.stack.push(KindHash::clone(enu_kind_hash));
                 self.visit_function_declaration(fd);
-                let method_id = self.last_local.take().unwrap();
-                (fd.signature.name.clone(), method_id)
+                let func_val = self.current_env.get_value_by_name(&fd.signature.name);
+                (fd.signature.name.clone(), Value::clone(func_val))
+
             })
             .collect();
 
@@ -349,7 +350,7 @@ impl Evaluator for Interpreter {
             .map(|tvd| {
                 self.visit_expression(&tvd.type_reference);
                 // type check that last_local is a type/kind
-                let evaluated = self.last_local.take().unwrap();
+                let evaluated = self.stack.pop().unwrap();
                 (tvd.name.clone(), evaluated)
             })
             .collect();
@@ -371,8 +372,8 @@ impl Evaluator for Interpreter {
             .map(|fd| {
                 self.stack.push(KindHash::clone(obj_kind_hash));
                 self.visit_function_declaration(fd);
-                let method_id = self.last_local.take().unwrap();
-                (fd.signature.name.clone(), method_id)
+                let func_val = self.current_env.get_value_by_name(&fd.signature.name);
+                (fd.signature.name.clone(), Value::clone(func_val))
             })
             .collect();
 
@@ -423,6 +424,7 @@ impl Evaluator for Interpreter {
                 .map(|fs| {
                     self.stack.push(KindHash::clone(contract_kind_hash));
                     self.visit_function_signature(&fs);
+                    // TODO -> THIS MIGHT BE THE WRONG MOVE
                     self.stack.pop().unwrap()
                 })
                 .collect();
@@ -495,7 +497,7 @@ impl Evaluator for Interpreter {
         }
 
         let contract = self.kind_table.load(contract_kind_hash);
-        let required_functions_by_name: HashMap<String, Arc<RwLock<FunctionSignature>>> = if let Kind::Contract(c) = contract.read().unwrap().deref() {
+        let required_functions_by_name: HashMap<String, KindHash> = if let Kind::Contract(c) = contract.read().unwrap().deref() {
             c.required_functions
                 .iter()
                 .map(|kind_hash| {
@@ -514,44 +516,20 @@ impl Evaluator for Interpreter {
             panic!(message);
         };
 
-        // LEFT OFF HERE
         let implementing_functions_by_name: HashMap<String, Value> = impl_decl.functions
             .iter()
             .map(|fd| {
-                self.last_local = Some(implementor_type_sym_id);
+                self.stack.push(KindHash::clone(implementor_kind_hash));
                 self.visit_function_declaration(fd);
-                let sym_id = self.last_local.take().unwrap();
-                let impl_func_sym = self.symbol_table.load_symbol(sym_id);
-                let impl_func_sym_readable = impl_func_sym.read().unwrap();
-                return if let Kind::Function(f) = impl_func_sym_readable.deref() {
-                    let impl_sig_sym = self.symbol_table.load_symbol(f.signature);
-                    let impl_sig_sym_readable = impl_sig_sym.read().unwrap();
-                    let impl_sig = if let Kind::FunctionSignature(fs) = impl_sig_sym_readable.deref() {
-                        fs
-                    } else {
-                        let message = format!("COMPILER BUG: Siganture of function: {:?} is not a FunctionSignature: {:?}", f, impl_sig_sym);
-                        panic!(message);
-                    };
-
-                    (impl_sig.name.clone(), sym_id)
-                } else {
-                    let message = format!("COMPILER BUG: Contract required function is not a FunctionSignature: {:?}", impl_func_sym);
-                    panic!(message);
-                } 
+                let func_val = self.current_env.get_value_by_name(&fd.signature.name);
+               
+                // TODO -> need to define in env?
+               
+                (impl_sig.name.clone(), Value::clone(func_val))
             })
             .collect();
 
-        for (req_name, req_sig_id) in required_functions_by_name.iter() {
-            let req_sig_sym = self.symbol_table.load_symbol(*req_sig_id);
-            let req_sig_sym_readable = req_sig_sym.read().unwrap();
-            let req_sig = if let Kind::FunctionSignature(f) = req_sig_sym_readable.deref() {
-                f
-            } else {
-                let message = format!("COMPILER BUG: Kind pointing to required function signature is a {} but expected a FunctionSignature", 
-                                      req_sig_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap());
-                panic!(message);
-            };
-
+        for (req_name, req_sig) in required_functions_by_name.iter() {
             if !implementing_functions_by_name.contains_key(req_name) {
                 let message = format!("Contract implementation for {} by {} requires function {}",
                                       contract_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap(),
@@ -560,28 +538,8 @@ impl Evaluator for Interpreter {
                 panic!(message);
             }
 
-            let implementor_id = implementing_functions_by_name.get(req_name).unwrap();
-            let implementor_func_sym = self.symbol_table.load_symbol(*implementor_id);
-            let implementor_func_sym_readable = implementor_func_sym.read().unwrap();
-            let implementor_func = if let Kind::Function(f) = implementor_func_sym_readable.deref() {
-                f
-            } else {
-                let message = format!("COMPILER BUG: Kind pointed to implementing function is a {} but expected a Function", 
-                                      implementor_func_sym_readable.kind_hash(&self.symbol_table).unwrap());
-                panic!(message);
-            };
+            let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap().to_ref();
 
-            let implementor_func_sig_sym = self.symbol_table.load_symbol(implementor_func.signature);
-            let implementor_func_sig_sym_readable = implementor_func_sig_sym.read().unwrap();
-            let implementor_func_sig = if let Kind::FunctionSignature(fs) = implementor_func_sig_sym_readable.deref() {
-                fs
-            } else {
-                
-                let message = format!("COMPILER BUG: Kind pointing function signature is a {} but expected a FunctionSignature", 
-                                      implementor_func_sig_sym_readable.kind_hash(&self.symbol_table).unwrap());
-                panic!(message);
-            };
-         
             if !req_sig.is_compatible_with(&implementor_func_sig, &self.symbol_table) {
                 let message = format!("Function with name: {} has signature: {} but expected: {}",
                                       req_name,
@@ -591,35 +549,15 @@ impl Evaluator for Interpreter {
             }
         }
 
-        for (_impl_name, func_id) in implementing_functions_by_name.iter() {
-            let func_sym = self.symbol_table.load_symbol(*func_id);
-            let func_sym_readable = func_sym.read().unwrap();
-            let func = if let Kind::Function(f) = func_sym_readable.deref() {
-                f
-            } else {
-                let message = format!("COMPILER BUG: Kind pointed to implementing function is a {} but expected a Function", 
-                                      func_sym_readable.kind_hash(&self.symbol_table).unwrap());
-                panic!(message);
-            };
-
-            let func_sig_sym = self.symbol_table.load_symbol(func.signature);
-            let func_sig_sym_readable = func_sig_sym.read().unwrap();
-            let func_sig = if let Kind::FunctionSignature(fs) = func_sig_sym_readable.deref() {
-                fs
-            } else {
-                let message = format!("COMPILER BUG: Kind pointed to by signature of function: {} is a {} but expected a FunctionSignature", 
-                                      func.kind_hash(&self.symbol_table).unwrap(),
-                                      func_sig_sym_readable.kind_hash(&self.symbol_table).unwrap());
-                panic!(message);
-            };
-
-            if !required_functions_by_name.contains_key(&func_sig.name) {
+        for (_impl_name, func_val) in implementing_functions_by_name.iter() {
+            let func_ref = func_val.to_ref();
+            if !required_functions_by_name.contains_value(&func_ref.ty) {
                 let message = format!("Contract implementation for {} by {} contains unknown function: {}",
                                       contract_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap(),
                                       implementor_type_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap(),
                                       func.kind_hash(&self.symbol_table).unwrap());
                 panic!(message);
-            }
+            } 
         }
     
         let vtable = self.vtables.load_vtable(vptr);

@@ -50,7 +50,7 @@ pub(crate) struct Reference {
 pub(crate) enum Item {
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
-    Function(Function),
+    Function(Arc<RwLock<Function>>),
     ModuleReference(KindHash),
     TypeReference(KindHash),
 }
@@ -509,7 +509,7 @@ impl VTables {
 pub(crate) struct VTable {
     pub implementor: KindHash,
     pub implementing: KindHash,
-    pub functions: HashMap<String, KindHash>,
+    pub functions: HashMap<String, Value>,
 }
 
 #[derive(Debug)]
@@ -677,7 +677,7 @@ pub(crate) struct Object {
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
     pub fields: HashMap<String, KindHash>,
-    pub methods: HashMap<String, KindHash>,
+    pub methods: HashMap<String, Value>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
 }
 
@@ -695,7 +695,7 @@ pub(crate) struct Enum {
     pub type_arguments: Vec<(String, KindHash)>,
     pub variant_tys: HashMap<String, Option<KindHash>>,
     pub variant_values: HashMap<String, Address>,
-    pub methods: HashMap<String, KindHash>,
+    pub methods: HashMap<String, Value>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
 }
 

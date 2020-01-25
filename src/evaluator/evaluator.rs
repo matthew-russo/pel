@@ -1,8 +1,6 @@
 use crate::syntax::parse_tree::*;
 use super::{prelude, interpreter::Interpreter};
 
-use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
 // Type vs Value
@@ -287,7 +285,10 @@ impl Heap {
     pub fn load_type_reference(&self, addr: Address) -> Option<KindHash> {
         match self.load(addr) {
             Some(item) => {
-
+                match item {
+                    Item::TypeReference(kind_hash) => Some(KindHash::clone(kind_hash)),
+                    _ => None,
+                }
             },
             None => None
         }

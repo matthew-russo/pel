@@ -88,36 +88,6 @@ impl Interpreter {
         self.errors.push(error);
     }
 
-    fn var_name_to_define(&mut self, assignment_node: &VariableAssignment) -> Option<String> {
-        let ce = if let Expression::ChainableExpressionNode(ce) = &assignment_node.target {
-            ce
-        } else {
-            return None;
-        };
-
-        if !ce.chained.is_empty() {
-            return None;
-        }
-
-        let var = if let ExpressionStart::VariableNode(var) = &ce.start {
-            var
-        } else {
-            return None;
-        };
-
-        let var_name = match var {
-            Variable::Name(n) => n.clone(),
-            Variable::SelfVariable => SELF_VAR_SYMBOL_NAME.into(),
-            Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
-        };
-
-        if let None = self.current_env.read().unwrap().get_symbol_by_name(&var_name) {
-            Some(var_name) 
-        } else {
-            None
-        }
-    }
-
     pub fn set_current_env(&mut self, env: Environment) {
         self.current_env = Arc::new(RwLock::new(env));
     }
@@ -160,7 +130,48 @@ impl Interpreter {
             .collect()
     }
 
+    fn resolve_value(&mut self, expr: &Expression) -> Address {
+        // this can be:
+        //      new var name
+        //      preexisting var name
+        //      field name
+        
+        let ce = if let Expression::ChainableExpressionNode(ce) = &expr {
+            ce
+        } else {
+            let message = format!("Cannot assign to a {}", expr);
+            panic!(message);
+        };
 
+        // check if single name
+        //    -> either new var and need to alloc
+        //    -> or preexisting var and return ref addr
+        
+        // otherwise we need to evalute the chain to a field
+
+        // OLD CODE
+        // if !ce.chained.is_empty() {
+        //     return None;
+        // }
+
+        // let var = if let ExpressionStart::VariableNode(var) = &ce.start {
+        //     var
+        // } else {
+        //     return None;
+        // };
+
+        // let var_name = match var {
+        //     Variable::Name(n) => n.clone(),
+        //     Variable::SelfVariable => SELF_VAR_SYMBOL_NAME.into(),
+        //     Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
+        // };
+
+        // if let None = self.current_env.read().unwrap().get_symbol_by_name(&var_name) {
+        //     Some(var_name) 
+        // } else {
+        //     None
+        // }
+    }
 }
 
 impl Evaluator for Interpreter {
@@ -232,7 +243,7 @@ impl Evaluator for Interpreter {
         };
 
         let enu_kind_hash = enu.kind_hash();
-        self.kind_table.insert(Kind::Enum(enu));
+        self.kind_table.create(Kind::Enum(enu));
 
         let variant_values = enum_decl.variants
             .iter()
@@ -365,7 +376,7 @@ impl Evaluator for Interpreter {
         };
 
         let obj_kind_hash = obj.kind_hash();
-        self.kind_table.insert(Kind::Object(obj));
+        self.kind_table.create(Kind::Object(obj));
 
         let methods = obj_decl.methods
             .iter()
@@ -417,7 +428,7 @@ impl Evaluator for Interpreter {
 
 
         let contract_kind_hash = contract.kind_hash();
-        self.kind_table.insert(Kind::Contract(obj));
+        self.kind_table.create(Kind::Contract(obj));
 
         let required_functions = contract_decl.functions
                 .iter()
@@ -578,7 +589,7 @@ impl Evaluator for Interpreter {
             self.current_env
                 .read()
                 .unwrap()
-                .get_symbol_by_name(name)
+                .get_value_by_name(name)
                 .is_some()
         };
 
@@ -589,24 +600,40 @@ impl Evaluator for Interpreter {
         }
 
         self.visit_function_signature(&func_decl.signature);
-        let func_sig_id = self.last_local.take().unwrap();
+        let func_sig_ref = self.current_env
+            .read()
+            .unwrap()
+            .get_value_by_name(&func_decl.signature.name)
+            .unwrap()
+            .to_ref();
+
+        let func_sig_kind_hash = self.heap.load_type_reference(func_sig_ref.address).unwrap();
+        let func_sig = self.kind_table.load(func_sig_kind_hash);
 
         let func = Function {
             // TODO -> remove this and pass module context in
             parent: KindTable::MAIN_MODULE_SYMBOL_ID,
-            signature: func_sig_id,
+            signature: func_sig_kind_hash,
             body: func_decl.body.clone(),
-            environment: self.current_env.clone(),
+            // TODO -> this should be a deep clone i think
+            environment: Arc::clone(self.current_env),
         };
 
-        let func_sym = Kind::Function(func);
-
-        let symbol_id = self.symbol_table.new_symbol(func_sym);
+        let addr = self.heap.alloc();
+        self.heap.store(addr, Item::Function(func));
+        let func_val = Value::Reference(Reference {
+            // TODO -> need a concept of a function handle which is only based on its inputs and
+            // outputs and not the name, context that its in. This is for lambdas, functions as
+            // values, and checking whether functions satisfy parameter/return constraints
+            ty: func_sig_kind_hash,
+            is_self: false,
+            address: addr,
+            size: std::u32::MAX,
+        });
         self.current_env
             .write()
             .unwrap()
-            .define(name.clone(), symbol_id);
-        self.last_local = Some(symbol_id);
+            .define(name.clone(), func_val);
     }
 
     fn visit_function_signature(&mut self, func_sig: &crate::syntax::parse_tree::FunctionSignature) {
@@ -616,12 +643,12 @@ impl Evaluator for Interpreter {
         for param in func_sig.parameters.iter() {
             let p = match param {
                 FunctionParameter::SelfParam => {
-                    let current_sym_id = self.last_local.take().unwrap();
-                    (SELF_VAR_SYMBOL_NAME.into(), current_sym_id)
+                    // TODO -> might want to pop this regardless or else our stack will always grow
+                    (SELF_VAR_SYMBOL_NAME.into(), self.stack.pop().unwrap())
                 },
                 FunctionParameter::TypedVariableDeclarationParam(tvd) => {
                     self.visit_expression(&tvd.type_reference);
-                    (tvd.name.clone(), self.last_local.take().unwrap())
+                    (tvd.name.clone(), self.stack.pop().unwrap())
                 }
             };
 
@@ -701,6 +728,12 @@ impl Evaluator for Interpreter {
             // track whether this object is acting as a Contract?
         }
 
+        // TODO -> what if this is a scalar?
+        // we can't return an address then
+        // std::mem::replace as a hacky workaround?
+        // well if its a scalar, then its just a value so all we need to do is update the name in
+        // the current_env to point to a new value and there is no heap assignment
+        // maybe return a (Option<String>, Option<Address>)?
         let addr = self.resolve_address(var_assignment.target);
         self.heap.store(addr, value);
     }
@@ -735,33 +768,42 @@ impl Evaluator for Interpreter {
                     Variable::SelfType => "Self".to_string(),
                 };
 
-                self.last_local = match self.current_env.read().unwrap().get_symbol_by_name(&name) {
-                    Some(sym) => {
-                        Some(sym.clone())
-                    },
+                let var_val = match self.current_env.read().unwrap().get_value_by_name(&name) {
+                    Some(val) => Value::clone(val),
                     None => {
                         let message = format!("unknown symbol {:?}", name);
                         panic!(message);
-                    },
+                    }
                 }
+
+                self.stack.push(var_val);
             }
             ValueNode(ref value) => {
-                // TODO -> need to revisit temporaries. Shouldn't store them in global symbol
-                // table...
-                let symbol_id = self.symbol_table.new_symbol(Kind::Value(value.clone()));
-                self.last_local = Some(symbol_id);
+                let val = Value::Scalar(Scalar::from(value));
+                self.stack.push(val);
             }
         };
 
 
         for expr_chain in chainable_expr.chained.iter() {
             match expr_chain {
-                FieldAccessNode(field_access) => self.visit_field_access(field_access),
-                ModuleAccessNode(mod_access) => self.visit_module_access(mod_access),
-                ObjectInitializationNode(obj_init) => self.visit_object_initialization(obj_init),
-                FunctionApplicationNode(func_app) => self.visit_function_application(func_app),
-                TypeApplicationNode(type_app) => self.visit_type_application(type_app),
-                BinaryOperationNode(bin_op) => self.visit_binary_operation(bin_op),
+                ExpressionChain::FieldAccessNode(field_access)
+                    => self.visit_field_access(field_access),
+
+                ExpressionChain::ModuleAccessNode(mod_access)
+                    => self.visit_module_access(mod_access),
+
+                ExpressionChain::ObjectInitializationNode(obj_init)
+                    => self.visit_object_initialization(obj_init),
+
+                ExpressionChain::FunctionApplicationNode(func_app)
+                    => self.visit_function_application(func_app),
+
+                ExpressionChain::TypeApplicationNode(type_app)
+                    => self.visit_type_application(type_app),
+
+                ExpressionChain::BinaryOperationNode(bin_op)
+                    => self.visit_binary_operation(bin_op),
             };
         }
     }

@@ -2,6 +2,7 @@ use crate::syntax::parse_tree::*;
 use super::{prelude, interpreter::Interpreter};
 
 use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 
 // Type vs Value
 //         but a value can "be" a type. ie point to a type
@@ -60,8 +61,8 @@ impl Clone for Item {
         match self {
             ObjectInstance(ref oi_arc)   => ObjectInstance(Arc::clone(oi_arc)),
             EnumInstance(ref ei_arc)     => EnumInstance(Arc::clone(ei_arc)),
-            ModuleReference(ref kh)      => ModuleReference(kh),
-            TypeReference(ref kh)        => TypeReference(kh),
+            ModuleReference(ref kh)      => ModuleReference(KindHash::clone(kh)),
+            TypeReference(ref kh)        => TypeReference(KindHash::clone(kh)),
         }
     }
 }
@@ -226,7 +227,7 @@ impl Value {
     }
 }
 
-type Address = u32;
+pub(crate) type Address = u32;
 
 // heap contains item
 pub(crate) struct Heap {
@@ -301,11 +302,13 @@ pub(crate) enum Kind {
     Contract(Contract),
     Module(Module),
     FunctionSignature(FunctionSignature),
-    ScalarType(),
+    ScalarType(ScalarType),
     Type(KindHash), // probably want this to be different. probably want a table of type equivalence
 }
 
 pub(crate) type KindHash = String;
+
+pub(crate) const KIND_KIND_HASH_STR: &str = "kind";
 
 pub(crate) trait KindHashable {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash;
@@ -335,16 +338,7 @@ impl KindHashable for Object {
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_kind_hash = self.type_arguments
                 .iter()
-                .map(|(type_var_name, sym_id)| {
-                    let type_var_sym = kind_table.load(*sym_id);
-                    let readable_type_var_sym = type_var_sym.read().unwrap();
-                    match readable_type_var_sym.deref() {
-                        Symbol::TypeVariable(Some(tvt)) => {
-                            kind_table.load(*tvt).read().unwrap().kind_hash(kind_table).unwrap()
-                        },
-                        _ => type_var_name.clone()
-                    }
-                })
+                .map(|(_type_var_name, kind_hash)| kind_hash.clone())
                 .collect::<Vec<String>>()
                 .join(",");
    
@@ -465,7 +459,13 @@ pub(crate) struct KindTable {
 }
 
 impl KindTable {
+    pub fn create(&mut self, kind: Kind) {
 
+    }
+
+    pub fn load(&self, to_load: KindHash) -> Arc<RwLock<Kind>> {
+
+    }
 }
 
 pub(crate) type VTableId = u32;
@@ -716,7 +716,7 @@ pub(crate) struct FunctionSignature {
 }
 
 impl FunctionSignature {
-    pub fn is_compatible_with(&self, other: &FunctionSignature, table: &SymbolTable) -> bool {
+    pub fn is_compatible_with(&self, other: &FunctionSignature, table: &KindTable) -> bool {
         if self.name != other.name {
             return false;
         }
@@ -822,7 +822,6 @@ impl KindHashable for Function {
 #[derive(Clone)]
 pub(crate) struct NativeFunction {
     pub name: String,
-    pub args: Vec<Expression>,
     pub func: fn(&mut Interpreter, Vec<Value>) -> Option<Value>,
 }
 

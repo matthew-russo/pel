@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
+use crate::syntax::parse_tree;
 use crate::evaluator::evaluator::{
+    Address,
     Callable,
     Contract,
     Enum,
@@ -18,6 +20,9 @@ use crate::evaluator::evaluator::{
     VTable,
     KindTable,
     Kind,
+    KindHash,
+    KindHashable,
+    KIND_KIND_HASH_STR,
     Value,
     Scalar,
     Reference,
@@ -109,7 +114,7 @@ impl Interpreter {
         }
     }
 
-    fn generate_type_holes(&mut self, type_params: &Vec<String>) -> Vec<> {
+    fn generate_type_holes(&mut self, type_params: &Vec<String>) -> Vec<(String, KindHash)> {
         type_params
             .iter()
             .map(|type_param_name| {
@@ -130,13 +135,13 @@ impl Interpreter {
             .collect()
     }
 
-    fn resolve_value(&mut self, expr: &Expression) -> Address {
+    fn resolve_value(&mut self, expr: &parse_tree::Expression) -> Address {
         // this can be:
         //      new var name
         //      preexisting var name
         //      field name
         
-        let ce = if let Expression::ChainableExpressionNode(ce) = &expr {
+        let ce = if let parse_tree::Expression::ChainableExpressionNode(ce) = &expr {
             ce
         } else {
             let message = format!("Cannot assign to a {}", expr);
@@ -175,32 +180,34 @@ impl Interpreter {
 }
 
 impl Evaluator for Interpreter {
-    fn visit_program(&mut self, program: &Program) {
+    fn visit_program(&mut self, program: &parse_tree::Program) {
         for decl in program.declarations.iter() {
             self.visit_declaration(decl);
         }
     }
 
-    fn visit_declaration(&mut self, decl: &Declaration) {
+    fn visit_declaration(&mut self, decl: &parse_tree::Declaration) {
+        use parse_tree::Declaration::*;
+
         match decl {
-            Declaration::EnumDeclarationNode(enum_decl)
+            EnumDeclarationNode(enum_decl)
                 => self.visit_enum_declaration(enum_decl),
 
-            Declaration::ContractDeclarationNode(contract_decl)
+            ContractDeclarationNode(contract_decl)
                 => self.visit_contract_declaration(contract_decl),
 
-            Declaration::ImplementationDeclarationNode(impl_decl)
+            ImplementationDeclarationNode(impl_decl)
                 => self.visit_implementation_declaration(impl_decl),
 
-            Declaration::ObjectDeclarationNode(obj_decl)
+            ObjectDeclarationNode(obj_decl)
                 => self.visit_object_declaration(obj_decl),
 
-            Declaration::FunctionDeclarationNode(func_decl)
+            FunctionDeclarationNode(func_decl)
                 => self.visit_function_declaration(func_decl),
         }
     }
 
-    fn visit_enum_declaration(&mut self, enum_decl: &EnumDeclaration) {
+    fn visit_enum_declaration(&mut self, enum_decl: &parse_tree::EnumDeclaration) {
         let mut local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
@@ -215,7 +222,7 @@ impl Evaluator for Interpreter {
                     let val = self.stack.pop().unwrap();
                     match val {
                         Value::Reference(r) => {
-                            if r.ty != KIND_KIND_HASH {
+                            if r.ty != KindHash::from(KIND_KIND_HASH_STR) {
                                 panic!("reference must be pointing to a kind but is actually: {}", r.ty);
                             }
                             Some(self.heap.load_type_reference(r.address).unwrap())
@@ -335,7 +342,7 @@ impl Evaluator for Interpreter {
         self.heap.store(addr, item);
         
         let val = Value::Reference(Reference {
-            ty: KIND_KIND_HASH,
+            ty: KindHash::from(KIND_KIND_HASH_STR),
             is_self: false,
             address: addr,
             size: std::u32::MAX,
@@ -349,7 +356,7 @@ impl Evaluator for Interpreter {
             .define(enum_decl.type_name.clone(), val);
     }
 
-    fn visit_object_declaration(&mut self, obj_decl: &ObjectDeclaration) {
+    fn visit_object_declaration(&mut self, obj_decl: &parse_tree::ObjectDeclaration) {
         let mut local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
@@ -399,7 +406,7 @@ impl Evaluator for Interpreter {
         let address = self.heap.alloc();
         self.heap.store(address, item);
         let reference_to_obj = Value::Reference(Reference {
-            ty: KIND_KIND_HASH,
+            ty: KindHash::from(KIND_KIND_HASH_STR),
             is_self: false,
             address,
             size: std::u32::MAX,
@@ -413,7 +420,7 @@ impl Evaluator for Interpreter {
             .define(obj_decl.type_name.clone(), reference_to_obj);
     }
 
-    fn visit_contract_declaration(&mut self, contract_decl: &ContractDeclaration) {
+    fn visit_contract_declaration(&mut self, contract_decl: &parse_tree::ContractDeclaration) {
         let mut local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
@@ -428,7 +435,7 @@ impl Evaluator for Interpreter {
 
 
         let contract_kind_hash = contract.kind_hash();
-        self.kind_table.create(Kind::Contract(obj));
+        self.kind_table.create(Kind::Contract(contract));
 
         let required_functions = contract_decl.functions
                 .iter()
@@ -450,7 +457,7 @@ impl Evaluator for Interpreter {
         let address = self.heap.alloc();
         self.heap.store(address, item);
         let reference_to_contract = Value::Reference(Reference {
-            ty: KIND_KIND_HASH,
+            ty: KindHash::from(KIND_KIND_HASH_STR),
             is_self: false,
             address,
             size: std::u32::MAX,
@@ -464,20 +471,20 @@ impl Evaluator for Interpreter {
             .define(contract_decl.type_name.clone(), reference_to_contract);
     }
 
-    fn visit_implementation_declaration(&mut self, impl_decl: &ImplementationDeclaration) {
+    fn visit_implementation_declaration(&mut self, impl_decl: &parse_tree::ImplementationDeclaration) {
         let local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
         self.visit_expression(&impl_decl.implementing_type);
         let implementor_type_ref = self.stack.pop().unwrap().to_ref();
-        if implementor_type_ref.ty != KIND_KIND_HASH {
+        if implementor_type_ref.ty != KindHash::from(KIND_KIND_HASH_STR) {
             panic!("implementor type must be a reference to a kind but got {}", implementor_type_ref.ty);
         }
         let implementor_kind_hash = self.heap.load_type_reference(implementor_type_ref.address).unwrap();
 
         self.visit_expression(&impl_decl.contract);
         let contract_type_ref = self.stack.pop().unwrap().to_ref();
-        if contract_type_ref.ty != KIND_KIND_HASH {
+        if contract_type_ref.ty != KindHash::from(KIND_KIND_HASH_STR) {
             panic!("contract type type must be a reference to a kind but got {}", implementor_type_ref.ty);
         }
         let contract_kind_hash = self.heap.load_type_reference(contract_type_ref.address).unwrap();
@@ -543,19 +550,19 @@ impl Evaluator for Interpreter {
         for (req_name, req_sig) in required_functions_by_name.iter() {
             if !implementing_functions_by_name.contains_key(req_name) {
                 let message = format!("Contract implementation for {} by {} requires function {}",
-                                      contract_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap(),
-                                      implementor_type_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap(),
+                                      contract_kind_hash,
+                                      implementor_kind_hash,
                                       req_sig.kind_hash(&self.symbol_table).unwrap());
                 panic!(message);
             }
 
             let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap().to_ref();
 
-            if !req_sig.is_compatible_with(&implementor_func_sig, &self.symbol_table) {
+            if !req_sig.is_compatible_with(&implementor_func_ref.ty, &self.symbol_table) {
                 let message = format!("Function with name: {} has signature: {} but expected: {}",
                                       req_name,
                                       req_sig.kind_hash(&self.symbol_table).unwrap(),
-                                      implementor_func_sig.kind_hash(&self.symbol_table).unwrap());
+                                      implementor_func_ref.ty);
                 panic!(message);
             }
         }
@@ -564,9 +571,9 @@ impl Evaluator for Interpreter {
             let func_ref = func_val.to_ref();
             if !required_functions_by_name.contains_value(&func_ref.ty) {
                 let message = format!("Contract implementation for {} by {} contains unknown function: {}",
-                                      contract_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap(),
-                                      implementor_type_sym.read().unwrap().kind_hash(&self.symbol_table).unwrap(),
-                                      func.kind_hash(&self.symbol_table).unwrap());
+                                      contract_kind_hash,
+                                      implementor_kind_hash,
+                                      func_ref.ty);
                 panic!(message);
             } 
         }
@@ -578,11 +585,11 @@ impl Evaluator for Interpreter {
         self.current_env = parent_env;
     }
 
-    fn visit_variant_declaration(&mut self, variant_decl: &VariantDeclaration) {
+    fn visit_variant_declaration(&mut self, variant_decl: &parse_tree::VariantDeclaration) {
         panic!("unimplemented visit_variant_declaration");
     }
 
-    fn visit_function_declaration(&mut self, func_decl: &FunctionDeclaration) {
+    fn visit_function_declaration(&mut self, func_decl: &parse_tree::FunctionDeclaration) {
         let name = &func_decl.signature.name;
 
         let already_exists = {
@@ -636,17 +643,17 @@ impl Evaluator for Interpreter {
             .define(name.clone(), func_val);
     }
 
-    fn visit_function_signature(&mut self, func_sig: &crate::syntax::parse_tree::FunctionSignature) {
+    fn visit_function_signature(&mut self, func_sig: &parse_tree::FunctionSignature) {
         let type_params = self.generate_type_holes(&func_sig.type_parameters);
 
         let mut parameters = Vec::new();
         for param in func_sig.parameters.iter() {
             let p = match param {
-                FunctionParameter::SelfParam => {
+                parse_tree::FunctionParameter::SelfParam => {
                     // TODO -> might want to pop this regardless or else our stack will always grow
                     (SELF_VAR_SYMBOL_NAME.into(), self.stack.pop().unwrap())
                 },
-                FunctionParameter::TypedVariableDeclarationParam(tvd) => {
+                parse_tree::FunctionParameter::TypedVariableDeclarationParam(tvd) => {
                     self.visit_expression(&tvd.type_reference);
                     (tvd.name.clone(), self.stack.pop().unwrap())
                 }
@@ -684,11 +691,11 @@ impl Evaluator for Interpreter {
         self.current_env.define(func_sig.name.clone(), value);
     }
 
-    fn visit_typed_variable_declaration(&mut self, typed_var_decl: &TypedVariableDeclaration) {
+    fn visit_typed_variable_declaration(&mut self, typed_var_decl: &parse_tree::TypedVariableDeclaration) {
         panic!("unimplemented typed_variable_declaration");
     }
 
-    fn visit_block_body(&mut self, block_body: &BlockBody) {
+    fn visit_block_body(&mut self, block_body: &parse_tree::BlockBody) {
         for stmt in block_body.statements.iter() {
             if self.exiting {
                 self.exiting = false;
@@ -701,8 +708,8 @@ impl Evaluator for Interpreter {
         self.exiting = false;
     }
 
-    fn visit_statement(&mut self, statement: &Statement) {
-        use Statement::*;
+    fn visit_statement(&mut self, statement: &parse_tree::Statement) {
+        use parse_tree::Statement::*;
 
         match statement {
             VariableAssignmentNode(var_assignment) =>
@@ -716,7 +723,7 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_variable_assignment(&mut self, var_assignment: &VariableAssignment) {
+    fn visit_variable_assignment(&mut self, var_assignment: &parse_tree::VariableAssignment) {
         self.visit_expression(&var_assignment.target_type);
         let target_type_reference = self.stack.pop().unwrap();
 
@@ -738,12 +745,12 @@ impl Evaluator for Interpreter {
         self.heap.store(addr, value);
     }
 
-    fn visit_return(&mut self, return_stmt: &Return) {
+    fn visit_return(&mut self, return_stmt: &parse_tree::Return) {
         self.visit_expression(&return_stmt.value);
         self.exiting = true;
     }
 
-    fn visit_expression(&mut self, expr: &Expression) {
+    fn visit_expression(&mut self, expr: &parse_tree::Expression) {
         use crate::syntax::parse_tree::Expression::*;
 
         match expr {
@@ -753,9 +760,9 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_chainable_expression(&mut self, chainable_expr: &ChainableExpression) {
-        use ExpressionChain::*;
-        use ExpressionStart::*;
+    fn visit_chainable_expression(&mut self, chainable_expr: &parse_tree::ChainableExpression) {
+        use parse_tree::ExpressionChain::*;
+        use parse_tree::ExpressionStart::*;
 
         match chainable_expr.start {
             ConditionalNode(ref cond_node) => self.visit_conditional(cond_node),
@@ -763,9 +770,9 @@ impl Evaluator for Interpreter {
             LoopNode(ref loop_node) => self.visit_loop(loop_node),
             VariableNode(ref variable) => {
                 let name = match variable {
-                    Variable::Name(name) => name.clone(),
-                    Variable::SelfVariable => "self".to_string(),
-                    Variable::SelfType => "Self".to_string(),
+                    parse_tree::Variable::Name(name) => name.clone(),
+                    parse_tree::Variable::SelfVariable => "self".to_string(),
+                    parse_tree::Variable::SelfType => "Self".to_string(),
                 };
 
                 let var_val = match self.current_env.read().unwrap().get_value_by_name(&name) {
@@ -774,7 +781,7 @@ impl Evaluator for Interpreter {
                         let message = format!("unknown symbol {:?}", name);
                         panic!(message);
                     }
-                }
+                };
 
                 self.stack.push(var_val);
             }
@@ -787,28 +794,28 @@ impl Evaluator for Interpreter {
 
         for expr_chain in chainable_expr.chained.iter() {
             match expr_chain {
-                ExpressionChain::FieldAccessNode(field_access)
+                FieldAccessNode(field_access)
                     => self.visit_field_access(field_access),
 
-                ExpressionChain::ModuleAccessNode(mod_access)
+                ModuleAccessNode(mod_access)
                     => self.visit_module_access(mod_access),
 
-                ExpressionChain::ObjectInitializationNode(obj_init)
+                ObjectInitializationNode(obj_init)
                     => self.visit_object_initialization(obj_init),
 
-                ExpressionChain::FunctionApplicationNode(func_app)
+                FunctionApplicationNode(func_app)
                     => self.visit_function_application(func_app),
 
-                ExpressionChain::TypeApplicationNode(type_app)
+                TypeApplicationNode(type_app)
                     => self.visit_type_application(type_app),
 
-                ExpressionChain::BinaryOperationNode(bin_op)
+                BinaryOperationNode(bin_op)
                     => self.visit_binary_operation(bin_op),
             };
         }
     }
 
-    fn visit_conditional(&mut self, conditional: &Conditional) {
+    fn visit_conditional(&mut self, conditional: &parse_tree::Conditional) {
         for if_expr in conditional.if_exprs.iter() {
             self.visit_expression(&if_expr.condition);
             let cond_value = self.stack.pop().unwrap();
@@ -831,11 +838,11 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_match(&mut self, match_node: &Match) {
+    fn visit_match(&mut self, match_node: &parse_tree::Match) {
         panic!("unimplemented visit_match");
     }
 
-    fn visit_loop(&mut self, loop_node: &Loop) {
+    fn visit_loop(&mut self, loop_node: &parse_tree::Loop) {
         let loop_local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(loop_local_env));
 
@@ -862,7 +869,7 @@ impl Evaluator for Interpreter {
         self.current_env = parent_env;
     }
 
-    fn visit_field_access(&mut self, field_access: &FieldAccess) {
+    fn visit_field_access(&mut self, field_access: &parse_tree::FieldAccess) {
         let to_access_value = self.stack.pop().unwrap();
         let reference = match to_access_value {
             Value::Reference(reference) => reference,
@@ -921,7 +928,7 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_module_access(&mut self, mod_access: &ModuleAccess) {
+    fn visit_module_access(&mut self, mod_access: &parse_tree::ModuleAccess) {
         let to_access_value = self.stack.pop().unwrap();
         let reference = match to_access_value {
             Value::Reference(reference) => reference,
@@ -999,7 +1006,7 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_object_initialization(&mut self, obj_init: &ObjectInitialization) {
+    fn visit_object_initialization(&mut self, obj_init: &parse_tree::ObjectInitialization) {
         let value = self.stack.pop().unwrap();
         let reference = value.to_reference();
         let item = self.heap.load(reference.address);
@@ -1056,7 +1063,7 @@ impl Evaluator for Interpreter {
         self.stack.push(value);
     }
 
-    fn visit_function_application(&mut self, func_app: &FunctionApplication) {
+    fn visit_function_application(&mut self, func_app: &parse_tree::FunctionApplication) {
         let to_apply_to_value = self.stack.pop().unwrap();
         let reference = match to_apply_to_value {
             Value::Reference(reference) => {
@@ -1092,7 +1099,7 @@ impl Evaluator for Interpreter {
         }
     }
 
-    fn visit_type_application(&mut self, type_app: &TypeApplication) {
+    fn visit_type_application(&mut self, type_app: &parse_tree::TypeApplication) {
         let to_apply_to_sym_id = self.last_local.take().unwrap();
         let to_apply_to = self.symbol_table.load_symbol(to_apply_to_sym_id);
 
@@ -1232,15 +1239,15 @@ impl Evaluator for Interpreter {
         self.last_local = Some(sym_id);
     }
 
-    fn visit_unary_operation(&mut self, _unary_op: &UnaryOperation) {
+    fn visit_unary_operation(&mut self, _unary_op: &parse_tree::UnaryOperation) {
         panic!("unimplemented visit_unary_operation");
     }
 
-    fn visit_lambda(&mut self, _lambda: &Lambda) {
+    fn visit_lambda(&mut self, _lambda: &parse_tree::Lambda) {
         panic!("unimplemented visit_lambda");
     }
 
-    fn visit_binary_operation(&mut self, bin_op: &BinaryOperation) {
+    fn visit_binary_operation(&mut self, bin_op: &parse_tree::BinaryOperation) {
         let lhs_value = self.stack.pop().unwrap();
         let lhs = match lhs_value {
             Value::Scalar(scalar) => scalar,

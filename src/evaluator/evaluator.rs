@@ -38,12 +38,37 @@ pub(crate) enum Value {
     Scalar(Scalar),
 }
 
+impl Value {
+    pub fn to_ref(&self) -> Option<Reference> {
+        match self {
+            Value::Reference(r) => Some(Reference::clone(r)),
+            _ => None,
+        }
+    }
+
+    pub fn get_ty(&self) -> KindHash {
+        match self {
+            Value::Reference(r) => r.ty,
+            Value::Scalar(s) => {
+                match s {
+                    Scalar::Boolean(_) => ScalarType::bool_kind_hash(),
+                    Scalar::Char(_)    => ScalarType::char_kind_hash(),
+                    Scalar::Integer(_) => ScalarType::int_kind_hash(),
+                    Scalar::Long(_)    => ScalarType::long_kind_hash(),
+                    Scalar::Float(_)   => ScalarType::float_kind_hash(),
+                    Scalar::Double(_)  => ScalarType::double_kind_hash(),
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Reference {
-    ty: KindHash,
-    is_self: bool,
-    address: Address,
-    size: u32,
+    pub ty: KindHash,
+    pub is_self: bool,
+    pub address: Address,
+    pub size: u32,
 }
 
 pub(crate) enum Item {
@@ -77,7 +102,7 @@ pub(crate) enum Scalar {
     Char(char),
 }
 
-impl Value {
+impl Scalar {
     fn to_bool(&self) -> Option<bool> {
         match self {
             Scalar::Boolean(b) => Some(*b),
@@ -120,13 +145,6 @@ impl Value {
         }
     }
 
-    fn to_reference(&self) -> Option<Reference> {
-        match self {
-            Value::Reference(r) => Some(r),
-            _ => None,
-        }
-    }
-
     pub fn add(lhs: Self, rhs: Self) -> Self {
         use Scalar::*;
 
@@ -142,88 +160,88 @@ impl Value {
     pub fn int_add(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::IntegerValue(lhs + rhs);
+        return Scalar::Integer(lhs + rhs);
     }
 
     pub fn float_add(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_float().unwrap();
         let rhs = rhs.to_float().unwrap();
-        return Value::FloatValue(lhs + rhs);
+        return Scalar::Float(lhs + rhs);
     }
 
     // TODO -> This should take floats too
-    pub fn subtract(lhs: Self, rhs: Self) -> Value {
+    pub fn subtract(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::IntegerValue(lhs - rhs);
+        return Scalar::Integer(lhs - rhs);
     }
 
     // TODO -> This should take floats too
-    pub fn multiply(lhs: Self, rhs: Self) -> Value {
+    pub fn multiply(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::IntegerValue(lhs * rhs);
+        return Scalar::Integer(lhs * rhs);
     }
 
     // TODO -> This should take floats too
-    pub fn divide(lhs: Self, rhs: Self) -> Value {
+    pub fn divide(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::IntegerValue(lhs / rhs);
+        return Scalar::Integer(lhs / rhs);
     }
 
     // TODO -> This should take floats too
-    pub fn less_than(lhs: Self, rhs: Self) -> Value {
+    pub fn less_than(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::BooleanValue(lhs < rhs);
+        return Scalar::Boolean(lhs < rhs);
     }
 
     // TODO -> This should take floats too
-    pub fn less_than_or_equal(lhs: Self, rhs: Self) -> Value {
+    pub fn less_than_or_equal(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::BooleanValue(lhs <= rhs);
+        return Scalar::Boolean(lhs <= rhs);
     }
 
     // TODO -> This should take floats too
-    pub fn greater_than(lhs: Self, rhs: Self) -> Value {
+    pub fn greater_than(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::BooleanValue(lhs > rhs);
+        return Scalar::Boolean(lhs > rhs);
     }
 
     // TODO -> This should take floats too
-    pub fn greater_than_or_equal(lhs: Self, rhs: Self) -> Value {
+    pub fn greater_than_or_equal(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::BooleanValue(lhs >= rhs);
+        return Scalar::Boolean(lhs >= rhs);
     }
 
     // TODO -> This should take any value type
-    pub fn equal_to(lhs: Self, rhs: Self) -> Value {
+    pub fn equal_to(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::BooleanValue(lhs == rhs);
+        return Scalar::Boolean(lhs == rhs);
     }
 
     // TODO -> This should take any value type
-    pub fn not_equal_to(lhs: Self, rhs: Self) -> Value {
+    pub fn not_equal_to(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
-        return Value::BooleanValue(lhs != rhs);
+        return Scalar::Boolean(lhs != rhs);
     }
 
-    pub fn or(lhs: Self, rhs: Self) -> Value {
+    pub fn or(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_bool().unwrap();
         let rhs = rhs.to_bool().unwrap();
-        return Value::BooleanValue(lhs || rhs);
+        return Scalar::Boolean(lhs || rhs);
     }
 
-    pub fn and(lhs: Self, rhs: Self) -> Value {
+    pub fn and(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_bool().unwrap();
         let rhs = rhs.to_bool().unwrap();
-        return Value::BooleanValue(lhs && rhs);
+        return Scalar::Boolean(lhs && rhs);
     }
 }
 
@@ -304,6 +322,41 @@ pub(crate) enum Kind {
     FunctionSignature(FunctionSignature),
     ScalarType(ScalarType),
     Type(KindHash), // probably want this to be different. probably want a table of type equivalence
+}
+
+pub(crate) enum ScalarType {
+    CharType,
+    BoolType,
+    IntegerType,
+    LongType,
+    FloatType,
+    DoubleType,
+}
+
+impl ScalarType {
+    pub fn bool_kind_hash() -> KindHash {
+        KindHash::from("bool")
+    }
+
+    pub fn char_kind_hash() -> KindHash {
+        KindHash::from("char")
+    }
+
+    pub fn int_kind_hash() -> KindHash {
+        KindHash::from("int")
+    }
+
+    pub fn long_kind_hash() -> KindHash {
+        KindHash::from("long")
+    }
+
+    pub fn float_kind_hash() -> KindHash {
+        KindHash::from("float")
+    }
+
+    pub fn double_kind_hash() -> KindHash {
+        KindHash::from("double")
+    }
 }
 
 pub(crate) type KindHash = String;
@@ -801,24 +854,6 @@ pub(crate) struct Function {
     pub environment: Arc<RwLock<Environment>>,
 }
 
-impl KindHashable for Function {
-    fn kind_hash(&self, table: &KindTable) -> Option<String> {
-        let parent = table.load(self.parent);
-
-        let parent_hash = match parent.read().unwrap().deref() {
-            Kind::Module(ref m) => m.kind_hash(table).unwrap(),
-            Kind::Object(ref o) => o.kind_hash(table).unwrap(),
-            Kind::Enum(ref e)   => e.kind_hash(table).unwrap(),
-            _ => unreachable!(),
-        };
-
-        let signature = table.load_symbol(self.signature);
-        let sig_hash = signature.read().unwrap().kind_hash(table).unwrap();
-
-        Some([parent_hash, sig_hash].join("::"))
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct NativeFunction {
     pub name: String,
@@ -853,7 +888,7 @@ pub(crate) trait Evaluator {
     fn visit_statement(&mut self, statment: &Statement);
     fn visit_variable_assignment(&mut self, var_assignment: &VariableAssignment);
     fn visit_return(&mut self, return_stmt: &Return);
-    fn visit_expression(&mut self, expr: &Expression) ;
+    fn visit_expression(&mut self, expr: &Expression);
     fn visit_chainable_expression(&mut self, chainable_expr: &ChainableExpression) ;
     fn visit_conditional(&mut self, conditional: &Conditional) ;
     fn visit_match(&mut self, match_node: &Match) ;

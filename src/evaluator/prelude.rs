@@ -1,30 +1,28 @@
 use std::collections::HashMap;
-use std::ops::Deref;
 
-use super::evaluator::{Kind, KindHash, KindTable, Item, NativeFunction, ObjectInstance, ScalarType};
+use super::evaluator::{Kind, KindHash, KindTable, Item, NativeFunction, ObjectInstance, ScalarType, Value};
 use crate::evaluator::interpreter::Interpreter;
-use crate::syntax::parse_tree::{Expression, Value};
 
 pub(super) fn prelude(kind_table: &mut KindTable) -> HashMap<String, KindHash> {
     let mut env = HashMap::new();
 
-    kind_table.create(Kind::ScalarType(ScalarType::BooleanType));
-    env.insert("bool".into(), ScalarType::bool_kind_hash());
+    kind_table.create(Kind::ScalarType(ScalarType::BoolType));
+    env.insert(String::from("bool"), ScalarType::bool_kind_hash());
 
     kind_table.create(Kind::ScalarType(ScalarType::CharType));
-    env.insert("char".into(), ScalarType::char_kind_hash());
+    env.insert(String::from("char"), ScalarType::char_kind_hash());
 
     kind_table.create(Kind::ScalarType(ScalarType::IntegerType));
-    env.insert("int".into(), ScalarType::int_kind_hash());
+    env.insert(String::from("int"), ScalarType::int_kind_hash());
 
     kind_table.create(Kind::ScalarType(ScalarType::LongType));
-    env.insert("long".into(), ScalarType::long_kind_hash());
+    env.insert(String::from("long"), ScalarType::long_kind_hash());
 
     kind_table.create(Kind::ScalarType(ScalarType::FloatType));
-    env.insert("float".into(), ScalarType::float_kind_hash());
+    env.insert(String::from("float"), ScalarType::float_kind_hash());
 
     kind_table.create(Kind::ScalarType(ScalarType::DoubleType));
-    env.insert("double".into(), ScalarType::double_kind_hash());
+    env.insert(String::from("double"), ScalarType::double_kind_hash());
 
     let print_symbol_id = kind_table.create(Kind::NativeFunction(print_nat_fn()));
     env.insert("print".into(), print_symbol_id);

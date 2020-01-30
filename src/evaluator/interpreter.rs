@@ -821,7 +821,13 @@ impl Evaluator for Interpreter {
         for if_expr in conditional.if_exprs.iter() {
             self.visit_expression(&if_expr.condition);
             let cond_value = self.stack.pop().unwrap();
-            match cond_value.to_bool() {
+
+            let cond_scalar = match cond_value {
+                Value::Scalar(s) => s,
+                Value::Reference(r) => panic!("expected a boolean scalar but got reference of type: {}", r.ty),
+            };
+
+            match cond_scalar.to_bool() {
                 Some(b) => {
                     if b {
                         self.visit_block_body(&if_expr.body);
@@ -829,7 +835,7 @@ impl Evaluator for Interpreter {
                     }
                 },
                 None => {
-                    let message = format!("expected a boolean value in if condition but got: {}", cond_value.ty);
+                    let message = format!("expected a boolean scalar in if condition but got: {}", cond_value.ty);
                     panic!(message);
                 },
             }
@@ -885,7 +891,7 @@ impl Evaluator for Interpreter {
 
         match item {
             Item::ObjectInstance(oi_arc) => {
-                let oi_readable = oi_arc.read().unwarp();
+                let oi_readable = oi_arc.read().unwrap();
                 let obj = self.kind_table.load(oi_readable.ty);
 
                 if reference.is_self {
@@ -896,7 +902,7 @@ impl Evaluator for Interpreter {
 
                     // we want to check methods here becuase a reference that is both self and
                     // has a contract_ty, it can still access regular methods
-                    if let Some(func) = self.get_obj_method_with_name(obj, field_access.field_name) {
+                    if let Some(func) = self.get_obj_method_with_name(obj.read().unwrap(), &field_access.field_name) {
                         // TODO -> push func reference
                         // TODO -> push self reference
                     }
@@ -909,7 +915,7 @@ impl Evaluator for Interpreter {
                     let vtable = self.vtables.load(vtable_id);
                 }
 
-                if let Some(func) = self.get_obj_method_with_name(obj, field_access.field_name) {
+                if let Some(func) = self.get_obj_method_with_name(obj.read().unwrap(), &field_access.field_name) {
                         // TODO -> push func reference
                         // TODO -> push self reference
                 }
@@ -973,7 +979,7 @@ impl Evaluator for Interpreter {
                                     // third arg is whether it contains a type
                                     let variant_ty = enu.varaint_tys.get(&mod_access.name).unwrap();
                                     let does_contain_ty = variant_ty.is_some();
-                                    let third_arg = Value::Scalar(Scalar::Bool(does_contain_ty));
+                                    let third_arg = Value::Scalar(Scalar::Boolean(does_contain_ty));
                                     self.stack.push(third_arg);
                                   
                                     if does_contain_ty {
@@ -1128,7 +1134,7 @@ impl Evaluator for Interpreter {
         let mut types = Vec::new();
         for arg in type_app.args.iter() {
             self.visit_expression(arg);
-            let evaluated_type = self.last_local.take().unwrap();
+            let evaluated_type = self.stack.pop().unwrap();
 
             // TODO -> type check that results are of type: Type
 
@@ -1199,7 +1205,7 @@ impl Evaluator for Interpreter {
                     old_sym_id_to_new_sym_id.insert(type_hole_sym_id, new_sym_id);
                     new_type_args.push((type_name.clone(), new_sym_id));
 
-                    for (field_name, maybe_field_sym_id) in e.variants.iter() {
+                    for (field_name, maybe_field_sym_id) in e.variant_tys.iter() {
                         if let Some(field_sym_id) = maybe_field_sym_id {
                             if field_sym_id == type_hole_sym_id {
                                 new_variants.insert(field_name.clone(), Some(new_sym_id));
@@ -1211,7 +1217,7 @@ impl Evaluator for Interpreter {
                 }
 
                 e.type_arguments = new_type_args;
-                e.variants = new_variants;
+                e.variant_tys = new_variants;
             },
             Kind::Function(_f) => {
                 panic!("unimplemented");
@@ -1236,7 +1242,7 @@ impl Evaluator for Interpreter {
             }
         }
         self.kind_table.replace_symbol(sym_id, sym);
-        self.last_local = Some(sym_id);
+        self.stack.push(sym_id);
     }
 
     fn visit_unary_operation(&mut self, _unary_op: &parse_tree::UnaryOperation) {

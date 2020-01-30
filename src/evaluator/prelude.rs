@@ -42,16 +42,20 @@ fn print_nat_fn() -> NativeFunction {
                 panic!(message);
             }
 
-            let value = args[0].to_ref();
-            let item = interp.heap.load(value.address);
-            let item_readable = item.read().unwrap();
-            match item_readable.deref() {
-                Item::ObjectInstance(ObjectInstance { ty: }) => {
-                    println!("{}", s);
-                    None
-                }
-                sym => panic!("expected an instance of String but got: {:?}", sym),
+            let reference = args[0].to_ref().unwrap();
+            if reference.ty != STRING_TY {
+                panic!("expected an instance of String but got: {:?}", reference.get_ty()),
             }
+
+            let obj_instance_arc = interp.heap.load(reference.address).to_object_instance().unwrap();
+            let char_array = oi_arc
+                .read()
+                .unwrap()
+                .fields
+                .get("__internal__")
+                .unwrap();
+            let rust_str = utils::pel_char_array_to_rust_string(char_array);
+            println!("{}", rust_str);
         },
     }
 }

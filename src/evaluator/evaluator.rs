@@ -103,42 +103,42 @@ pub(crate) enum Scalar {
 }
 
 impl Scalar {
-    fn to_bool(&self) -> Option<bool> {
+    pub fn to_bool(&self) -> Option<bool> {
         match self {
             Scalar::Boolean(b) => Some(*b),
             _ => None
         }
     }
 
-    fn to_int(&self) -> Option<i32> {
+    pub fn to_int(&self) -> Option<i32> {
         match self {
             Scalar::Integer(i) => Some(*i),
             _ => None
         }
     }
 
-    fn to_long(&self) -> Option<i64> {
+    pub fn to_long(&self) -> Option<i64> {
         match self {
             Scalar::Long(i) => Some(*i),
             _ => None
         }
     }
 
-    fn to_float(&self) -> Option<f32> {
+    pub fn to_float(&self) -> Option<f32> {
         match self {
             Scalar::Float(f) => Some(*f),
             _ => None
         }
     }
 
-    fn to_double(&self) -> Option<f64> {
+    pub fn to_double(&self) -> Option<f64> {
         match self {
             Scalar::Double(f) => Some(*f),
             _ => None
         }
     }
 
-    fn to_char(&self) -> Option<char> {
+    pub fn to_char(&self) -> Option<char> {
         match self {
             Scalar::Char(c) => Some(*c),
             _ => None
@@ -163,10 +163,22 @@ impl Scalar {
         return Scalar::Integer(lhs + rhs);
     }
 
+    pub fn long_add(lhs: Self, rhs: Self) -> Self {
+        let lhs = lhs.to_long().unwrap();
+        let rhs = rhs.to_long().unwrap();
+        return Scalar::Long(lhs + rhs);
+    }
+
     pub fn float_add(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_float().unwrap();
         let rhs = rhs.to_float().unwrap();
         return Scalar::Float(lhs + rhs);
+    }
+
+    pub fn double_add(lhs: Self, rhs: Self) -> Self {
+        let lhs = lhs.to_double().unwrap();
+        let rhs = rhs.to_double().unwrap();
+        return Scalar::Double(lhs + rhs);
     }
 
     // TODO -> This should take floats too
@@ -315,13 +327,94 @@ impl Heap {
 }
 
 pub(crate) enum Kind {
-    Object(Object),
-    Enum(Enum),
-    Contract(Contract),
-    Module(Module),
-    FunctionSignature(FunctionSignature),
-    ScalarType(ScalarType),
+    Object(Arc<RwLock<Object>>),
+    Enum(Arc<RwLock<Enum>>),
+    Contract(Arc<RwLock<Contract>>),
+    Module(Arc<RwLock<Module>>),
+    FunctionSignature(Arc<RwLock<FunctionSignature>>),
+    ScalarType(Arc<RwLock<ScalarType>>),
     Type(KindHash), // probably want this to be different. probably want a table of type equivalence
+}
+
+impl Kind {
+    pub fn to_object(&self) -> Option<Arc<RwLock<Object>>> {
+        use Kind::*;
+
+        match self {
+            Object(ref o) => Some(Arc::clone(o)),
+            _ => None,
+        }
+    }
+    
+    pub fn to_enum(&self) -> Option<Arc<RwLock<Enum>>> {
+        use Kind::*;
+
+        match self {
+            Enum(ref e) => Some(Arc::clone(e)),
+            _ => None,
+        }
+    }
+
+    pub fn to_contract(&self) -> Option<Arc<RwLock<Contract>>> {
+        use Kind::*;
+
+        match self {
+            Contract(ref c) => Some(Arc::clone(c)),
+            _ => None,
+        }
+    }
+
+    pub fn to_module(&self) -> Option<Arc<RwLock<Module>>> {
+        use Kind::*;
+
+        match self {
+            Module(ref m) => Some(Arc::clone(m)),
+            _ => None,
+        }
+    }
+
+    pub fn to_func_sig(&self) -> Option<Arc<RwLock<FunctionSignature>>> {
+        use Kind::*;
+
+        match self {
+            FunctionSignature(ref fs) => Some(Arc::clone(fs)),
+            _ => None,
+        }
+    }
+    
+    pub fn to_scalar_type(&self) -> Option<Arc<RwLock<ScalarType>>> {
+        use Kind::*;
+
+        match self {
+            ScalarType(ref st) => Some(Arc::clone(st)),
+            _ => None,
+        }
+    }
+
+    pub fn to_type(&self) -> Option<KindHash> {
+        use Kind::*;
+
+        match self {
+            Type(kind_hash) => Some(KindHash::clone(kind_hash)),
+            _ => None,
+        }
+    }
+}
+
+impl Clone for Kind {
+    fn clone(&self) -> Self {
+        use Kind::*;
+        
+        match self {
+            Object(o_arc) => Object(Arc::clone(o_arc)),
+            Enum(e_arc) => Enum(Arc::clone(e_arc)),
+            Contract(c_arc) => Contract(Arc::clone(c_arc)),
+            Module(m_arc) => Module(Arc::clone(m_arc)),
+            FunctionSignature(fs_arc) => FunctionSignature(Arc::clone(fs_arc)),
+            ScalarType(st_arc) => ScalarType(Arc::clone(st_arc)),
+            Type(kh) => Type(KindHash::clone(kh)),
+        }
+    }
 }
 
 pub(crate) enum ScalarType {
@@ -508,16 +601,16 @@ impl KindHashable for Function {
 }
 
 pub(crate) struct KindTable {
-    kinds: HashMap<KindHash, Arc<RwLock<Kind>>>,
+    kinds: HashMap<KindHash, Kind>,
 }
 
 impl KindTable {
-    pub fn create(&mut self, kind: Kind) {
-
+    pub fn create(&mut self, key: KindHash, kind: Kind) {
+        self.kinds.insert(key, kind);
     }
 
-    pub fn load(&self, to_load: KindHash) -> Arc<RwLock<Kind>> {
-
+    pub fn load(&self, to_load: &KindHash) -> Option<Kind> {
+        self.kinds.get(to_load).map(Kind::clone)
     }
 }
 

@@ -46,6 +46,13 @@ impl Value {
         }
     }
 
+    pub fn to_scalar(&self) -> Option<Scalar> {
+        match self {
+            Value::Scalar(r) => Some(Scalar::clone(r)),
+            _ => None,
+        }
+    }
+
     pub fn get_ty(&self) -> KindHash {
         match self {
             Value::Reference(r) => r.ty,
@@ -71,12 +78,50 @@ pub(crate) struct Reference {
     pub size: u32,
 }
 
+#[derive(Debug)]
 pub(crate) enum Item {
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
     Function(Arc<RwLock<Function>>),
     ModuleReference(KindHash),
     TypeReference(KindHash),
+}
+
+impl Item {
+    pub fn to_object_instance(&self) -> Option<Arc<RwLock<ObjectInstance>>> {
+        match self {
+            Item::ObjectInstance(oi_arc) => Some(Arc::clone(oi_arc)),
+            _ => None,
+        }
+    }
+
+    pub fn to_enum_instance(&self) -> Option<Arc<RwLock<EnumInstance>>> {
+        match self {
+            Item::EnumInstance(ei_arc) => Some(Arc::clone(ei_arc)),
+            _ => None,
+        }
+    }
+
+    pub fn to_function(&self) -> Option<Arc<RwLock<Function>>> {
+        match self {
+            Item::Function(func_arc) => Some(Arc::clone(func_arc)),
+            _ => None,
+        }
+    }
+
+    pub fn to_module_reference(&self) -> Option<KindHash> {
+        match self {
+            Item::ModuleReference(mod_ref) => Some(KindHash::clone(mod_ref)),
+            _ => None,
+        }
+    }
+
+    pub fn to_type_reference(&self) -> Option<KindHash> {
+        match self {
+            Item::TypeReference(type_ref) => Some(KindHash::clone(type_ref)),
+            _ => None,
+        }
+    }
 }
 
 impl Clone for Item {
@@ -257,9 +302,19 @@ impl Scalar {
     }
 }
 
+impl std::convert::From<crate::syntax::parse_tree::Value> for Scalar {
+    fn from(parse_value: crate::syntax::parse_tree::Value) -> Self {
+        match parse_value {
+            crate::syntax::parse_tree::Value::BooleanValue(b) => Scalar::Boolean(b),
+            crate::syntax::parse_tree::Value::CharValue(c)    => Scalar::Char(c),
+            crate::syntax::parse_tree::Value::IntegerValue(i) => Scalar::Integer(i),
+            crate::syntax::parse_tree::Value::FloatValue(f)   => Scalar::Float(f),
+        }
+    }
+}
+
 pub(crate) type Address = u32;
 
-// heap contains item
 pub(crate) struct Heap {
     next_address: Address,
     items: HashMap<Address, Item>,
@@ -267,11 +322,16 @@ pub(crate) struct Heap {
 
 impl Heap {
     pub fn new() -> Self {
-
+        Self {
+            next_address: 1,
+            items: HashMap::new(),
+        }
     }
 
     pub fn alloc(&mut self) -> Address {
-
+        let addr = self.next_address;
+        self.next_address += 1;
+        addr
     }
 
     pub fn free(&mut self, addr: Address) {
@@ -291,52 +351,55 @@ impl Heap {
 
     pub fn load_object_instance(&self, addr: Address) -> Option<Arc<RwLock<ObjectInstance>>> {
         match self.load(addr) {
-            Some(item) => {
-                match item {
-                    Item::ObjectInstance(ref oi_arc) => Some(Arc::clone(oi_arc)),
-                    _ => None,
-                }
-            },
-            None => None
+            Item::ObjectInstance(ref oi_arc) => Some(Arc::clone(oi_arc)),
+            _ => None,
         }
     }
 
     pub fn load_enum_instance(&self, addr: Address) -> Option<Arc<RwLock<EnumInstance>>> {
         match self.load(addr) {
-            Some(item) => {
-                match item {
-                    Item::EnumInstance(ref ei_arc) => Some(Arc::clone(ei_arc)),
-                    _ => None,
-                }
-            },
-            None => None
+            Item::EnumInstance(ref ei_arc) => Some(Arc::clone(ei_arc)),
+            _ => None,
         }
     }
 
     pub fn load_type_reference(&self, addr: Address) -> Option<KindHash> {
         match self.load(addr) {
-            Some(item) => {
-                match item {
-                    Item::TypeReference(kind_hash) => Some(KindHash::clone(kind_hash)),
-                    _ => None,
-                }
-            },
-            None => None
+            Item::TypeReference(kind_hash) => Some(KindHash::clone(&kind_hash)),
+            _ => None,
         }
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum Kind {
     Object(Arc<RwLock<Object>>),
     Enum(Arc<RwLock<Enum>>),
     Contract(Arc<RwLock<Contract>>),
     Module(Arc<RwLock<Module>>),
     FunctionSignature(Arc<RwLock<FunctionSignature>>),
-    ScalarType(Arc<RwLock<ScalarType>>),
+    ScalarType(ScalarType),
     Type(KindHash), // probably want this to be different. probably want a table of type equivalence
 }
 
 impl Kind {
+    pub fn is_a(lower_hash: &KindHash, upper_hash: &KindHash, kind_table: &KindTable) -> bool {
+        if lower_hash == upper_hash {
+            return true;
+        }
+        
+        let lower = kind_table.load(lower_hash).unwrap();
+        match lower {
+            Kind::Object(o_arc) => {
+                o_arc.read().unwrap().vtables.contains_key(upper_hash)
+            },
+            Kind::Enum(e_arc) => {
+                e_arc.read().unwrap().vtables.contains_key(upper_hash)
+            },
+            _ => false,
+        }
+    }
+
     pub fn to_object(&self) -> Option<Arc<RwLock<Object>>> {
         use Kind::*;
 
@@ -382,11 +445,9 @@ impl Kind {
         }
     }
     
-    pub fn to_scalar_type(&self) -> Option<Arc<RwLock<ScalarType>>> {
-        use Kind::*;
-
+    pub fn to_scalar_type(&self) -> Option<ScalarType> {
         match self {
-            ScalarType(ref st) => Some(Arc::clone(st)),
+            Kind::ScalarType(ref st) => Some(ScalarType::clone(st)),
             _ => None,
         }
     }
@@ -403,20 +464,19 @@ impl Kind {
 
 impl Clone for Kind {
     fn clone(&self) -> Self {
-        use Kind::*;
-        
         match self {
-            Object(o_arc) => Object(Arc::clone(o_arc)),
-            Enum(e_arc) => Enum(Arc::clone(e_arc)),
-            Contract(c_arc) => Contract(Arc::clone(c_arc)),
-            Module(m_arc) => Module(Arc::clone(m_arc)),
-            FunctionSignature(fs_arc) => FunctionSignature(Arc::clone(fs_arc)),
-            ScalarType(st_arc) => ScalarType(Arc::clone(st_arc)),
-            Type(kh) => Type(KindHash::clone(kh)),
+            Kind::Object(o_arc)   => Kind::Object(Arc::clone(o_arc)),
+            Kind::Enum(e_arc)     => Kind::Enum(Arc::clone(e_arc)),
+            Kind::Contract(c_arc) => Kind::Contract(Arc::clone(c_arc)),
+            Kind::Module(m_arc)   => Kind::Module(Arc::clone(m_arc)),
+            Kind::FunctionSignature(fs_arc) => Kind::FunctionSignature(Arc::clone(fs_arc)),
+            Kind::ScalarType(ref st)  => Kind::ScalarType(ScalarType::clone(st)),
+            Kind::Type(kh)        => Kind::Type(KindHash::clone(kh)),
         }
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum ScalarType {
     CharType,
     BoolType,
@@ -463,28 +523,22 @@ pub(crate) trait KindHashable {
 impl KindHashable for Kind {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
         match self {
-            Kind::Object(o) => o.kind_hash(kind_table),
-            Kind::Enum(e) => e.kind_hash(kind_table),
-            Kind::Contract(c) => c.kind_hash(kind_table),
-            Kind::Module(m) => m.kind_hash(kind_table),
-            Kind::Function(f) => f.kind_hash(kind_table),
-            Kind::Type(k_id) => {
-                let kind = kind_table.load(k_id);
-                kind.kind_hash(kind_table)
-            }
+            Kind::Object(o)   => o.read().unwrap().kind_hash(kind_table),
+            Kind::Enum(e)     => e.read().unwrap().kind_hash(kind_table),
+            Kind::Contract(c) => c.read().unwrap().kind_hash(kind_table),
+            Kind::Module(m)   => m.read().unwrap().kind_hash(kind_table),
+            Kind::FunctionSignature(fs) => fs.read().unwrap().kind_hash(kind_table),
+            Kind::Type(kh)    => KindHash::clone(kh),
         }
     }
 }
 
 impl KindHashable for Object {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let parent = kind_table.load(self.parent);
-        let hash = parent.read().unwrap().kind_hash(kind_table).unwrap();
-
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_kind_hash = self.type_arguments
                 .iter()
-                .map(|(_type_var_name, kind_hash)| kind_hash.clone())
+                .map(|(_, kh)| KindHash::clone(kh))
                 .collect::<Vec<String>>()
                 .join(",");
    
@@ -493,20 +547,17 @@ impl KindHashable for Object {
             String::new()
         };
         
-        [hash, self.name.clone(), to_append].join("::")
+        [self.parent, self.name.clone(), to_append].join("::")
 
     }
 }
 
 impl KindHashable for Enum {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let parent = kind_table.load(self.parent);
-        let hash = parent.read().unwrap().kind_hash(kind_table).unwrap();
-
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_kind_hash = self.type_arguments
                 .iter()
-                .map(|(type_var_name, sym_id)| kind_table.load(*sym_id).read().unwrap().kind_hash(kind_table).unwrap())
+                .map(|(_, kh)| KindHash::clone(kh))
                 .collect::<Vec<String>>()
                 .join(",");
    
@@ -515,20 +566,17 @@ impl KindHashable for Enum {
             String::new()
         };
         
-        [hash, self.name.clone(), to_append].join("::")
+        [self.parent, self.name.clone(), to_append].join("::")
     }
 }
 
 impl KindHashable for Contract {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let parent = kind_table.load(self.parent);
-        let hash = parent.read().unwrap().kind_hash(kind_table).unwrap();
-
         let to_append = if !self.type_arguments.is_empty() {
             let type_arg_kind_hash = self.type_arguments
                 .iter()
-                .map(|(_, sym_id)| kind_table.load(*sym_id).read().unwrap().kind_hash(kind_table).unwrap())
-                .collect::<Vec<String>>()
+                .map(|(_, kh)| KindHash::clone(kh))
+                .collect::<Vec<KindHash>>()
                 .join(",");
    
             ["<<".into(), type_arg_kind_hash, ">>".into()].join("")
@@ -536,16 +584,17 @@ impl KindHashable for Contract {
             String::new()
         };
         
-        [hash, self.name.clone(), to_append].join("::")
+        [self.parent, self.name.clone(), to_append].join("::")
     }
 }
 
 impl KindHashable for Module {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let mut hash = String::new();
-        if let Some(ref p) = self.parent {
-            hash = p.read().unwrap().kind_hash(kind_table).unwrap();
-        }
+        let hash = if let Some(ref p) = self.parent {
+            KindHash::clone(p)
+        } else {
+            String::new()
+        };
 
         [hash, self.name.clone()].join("::")
     }
@@ -553,50 +602,7 @@ impl KindHashable for Module {
 
 impl KindHashable for Function {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let type_params = if !self.type_parameters.is_empty() {
-            let tp_str = self.type_parameters
-                .iter()
-                .map(|(n, id)| {
-                    let sym = kind_table.load(*id);
-                    let sym_readable = sym.read().unwrap();
-                    sym_readable.kind_hash(kind_table).unwrap()
-                })
-                .collect::<Vec<String>>()
-                .join(", ");
-
-            format!("<{}>", tp_str)
-        } else {
-            String::new()
-        };
-
-        let params = if !self.parameters.is_empty() {
-            self.parameters
-                .iter()
-                .map(|(n, id)| {
-                    let sym = kind_table.load(*id);
-                    let sym_readable = sym.read().unwrap();
-                    sym_readable.kind_hash(kind_table).unwrap()
-                })
-                .collect::<Vec<String>>()
-                .join(", ")
-        } else {
-            String::new()
-        };
-
-        let returns = match self.returns {
-            Some(id) => {
-                let return_sym = kind_table.load(id);
-                let return_sym_readable = return_sym.read().unwrap();
-                let hash = return_sym_readable.kind_hash(kind_table).unwrap();
-
-                format!(" -> {}", hash)
-            },
-            None => String::new(),
-        };
-        
-        let hash = format!("func{} {}({}){}", type_params, self.name, params, returns);
-        Some(hash)
-
+        [self.parent.ty, self.signature].join("::")
     }
 }
 
@@ -605,7 +611,14 @@ pub(crate) struct KindTable {
 }
 
 impl KindTable {
-    pub fn create(&mut self, key: KindHash, kind: Kind) {
+    pub fn new() -> Self {
+        Self {
+            kinds: HashMap::new(),
+        }
+    }
+
+    pub fn create(&mut self, kind: Kind) {
+        let key = kind.kind_hash(self);
         self.kinds.insert(key, kind);
     }
 
@@ -805,7 +818,7 @@ impl Environment {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Module {
-    pub parent: Option<Arc<RwLock<KindHash>>>,
+    pub parent: Option<KindHash>,
     pub name: String,
     pub env: Arc<RwLock<Environment>>,
 }
@@ -867,21 +880,21 @@ impl FunctionSignature {
             return false;
         }
 
-        for ((n1, s1), (n2, s2)) in self.type_parameters.iter().zip(other.type_parameters.iter()) {
-            if !Kind::is_a(*s2, *s1, table) {
+        for ((n1, kh1), (n2, kh2)) in self.type_parameters.iter().zip(other.type_parameters.iter()) {
+            if !Kind::is_a(kh2, kh1, table) {
                 return false;
             }
         }
 
-        for ((n1, s1), (n2, s2)) in self.parameters.iter().zip(other.parameters.iter()) {
-            if !Kind::is_a(*s2, *s1, table) {
+        for ((n1, kh1), (n2, kh2)) in self.parameters.iter().zip(other.parameters.iter()) {
+            if !Kind::is_a(kh2, kh1, table) {
                 return false;
             }
         }
 
         if let Some(ret_id) = self.returns {
             if let Some(other_ret_id) = other.returns {
-                return Kind::is_a(other_ret_id, ret_id, table);
+                return Kind::is_a(&other_ret_id, &ret_id, table);
             } else {
                 return false;
             }
@@ -892,18 +905,13 @@ impl FunctionSignature {
 }
 
 impl KindHashable for FunctionSignature {
-    fn kind_hash(&self, table: &KindTable) -> Option<String> {
+    fn kind_hash(&self, table: &KindTable) -> String {
         let type_params = if !self.type_parameters.is_empty() {
             let tp_str = self.type_parameters
                 .iter()
-                .map(|(n, id)| {
-                    let sym = table.load(*id);
-                    let sym_readable = sym.read().unwrap();
-                    sym_readable.kind_hash(table).unwrap()
-                })
-                .collect::<Vec<String>>()
+                .map(|(n, kh)| KindHash::clone(kh))
+                .collect::<Vec<KindHash>>()
                 .join(", ");
-
             format!("<{}>", tp_str)
         } else {
             String::new()
@@ -912,30 +920,19 @@ impl KindHashable for FunctionSignature {
         let params = if !self.parameters.is_empty() {
             self.parameters
                 .iter()
-                .map(|(n, id)| {
-                    let sym = table.load(*id);
-                    let sym_readable = sym.read().unwrap();
-                    sym_readable.kind_hash(table).unwrap()
-                })
-                .collect::<Vec<String>>()
+                .map(|(n, kh)| KindHash::clone(kh))
+                .collect::<Vec<KindHash>>()
                 .join(", ")
         } else {
             String::new()
         };
 
         let returns = match self.returns {
-            Some(id) => {
-                let return_sym = table.load(id);
-                let return_sym_readable = return_sym.read().unwrap();
-                let hash = return_sym_readable.kind_hash(table).unwrap();
-
-                format!(" -> {}", hash)
-            },
+            Some(kh) => format!(" -> {}", kh),
             None => String::new(),
         };
         
-        let hash = format!("func{} {}({}){}", type_params, self.name, params, returns);
-        Some(hash)
+        format!("func{} {}({}){}", type_params, self.name, params, returns)
     }
 }
 

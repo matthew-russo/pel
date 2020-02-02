@@ -44,11 +44,11 @@ fn print_nat_fn() -> NativeFunction {
 
             let reference = args[0].to_ref().unwrap();
             if reference.ty != STRING_TY {
-                panic!("expected an instance of String but got: {:?}", reference.get_ty()),
+                panic!("expected an instance of String but got: {:?}", reference.ty);
             }
 
             let obj_instance_arc = interp.heap.load(reference.address).to_object_instance().unwrap();
-            let char_array = oi_arc
+            let char_array = obj_instance_arc
                 .read()
                 .unwrap()
                 .fields

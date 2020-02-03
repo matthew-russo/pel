@@ -39,6 +39,33 @@ pub(crate) enum Value {
 }
 
 impl Value {
+    pub fn create_type_reference(kind_hash: KindHash, heap: &Heap) -> Self {
+        let item = Item::TypeReference(KindHash::clone(&kind_hash));
+        let addr = heap.alloc();
+        heap.store(addr, item);
+        
+        Value::Reference(Reference {
+            ty: KindHash::from(KIND_KIND_HASH_STR),
+            is_self: false,
+            address: addr,
+            size: std::u32::MAX,
+        })
+    }
+
+    pub fn create_function(function: Function, kind_table: &KindTable, heap: &Heap) -> Self {
+        let kind_hash = function.kind_hash(kind_table);
+        let print_func = Item::Function(Arc::new(RwLock::new(function)));
+        let addr = heap.alloc();
+        heap.store(addr, print_func);
+        
+        Value::Reference(Reference {
+            ty: kind_hash,
+            is_self: false,
+            address: addr,
+            size: std::u32::MAX,
+        })
+    }
+
     pub fn to_ref(&self) -> Option<Reference> {
         match self {
             Value::Reference(r) => Some(Reference::clone(r)),
@@ -80,6 +107,7 @@ pub(crate) struct Reference {
 
 #[derive(Debug)]
 pub(crate) enum Item {
+    Array(Arc<RwLock<Array>>),
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
     Function(Arc<RwLock<Function>>),
@@ -602,6 +630,21 @@ impl KindHashable for Module {
 
 impl KindHashable for Function {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        match self {
+            Function::NativeFunction(nf) => nf.kind_hash(kind_table),
+            Function::PelFunction(pf) => pf.kind_hash(kind_table),
+        }
+    }
+}
+
+impl KindHashable for NativeFunction {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+        KindHash::from(format!("<NativeFunction-{}>", self.name))
+    }
+}
+
+impl KindHashable for PelFunction {
+    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
         [self.parent.ty, self.signature].join("::")
     }
 }
@@ -714,107 +757,12 @@ impl Environment {
     }
 }
 
-// #[derive(Clone, Debug)]
-// pub(crate) enum Symbol {
-//     Module(Module),
-//     Contract(Contract),
-//     Object(Object),
-//     ObjectInstance(ObjectInstance),
-//     Enum(Enum),
-//     EnumInstance(EnumInstance),
-//     SelfVariable(SymbolId),
-//     FunctionSignature(FunctionSignature),
-//     Function(Function),
-//     NativeFunction(NativeFunction),
-//     ValueType(ValueType),
-//     Value(Value),
-//     TypeVariable(Option<SymbolId>),
-// }
-// 
-// // i need a way for Option<<Int>> here
-// // and Option<<Int>> here to both result
-// // in the same type id. this gets more
-// // complicated when modules are involved
-// // to do this we need the fully qualified module/object
-// // path and the same for all of its type arguments
-// 
-// impl Symbol {
-//     // get_size(&mut self) -> u64;
-//     // defined_at(&mut self) -> Span;
-// 
-//     pub fn get_type(&self) -> SymbolId {
-//         match self {
-//             Symbol::Object(_) => {
-//                 SymbolTable::OBJECT_TYPE_SYMBOL_ID
-//             },
-//             Symbol::ObjectInstance(oi) => {
-//                 oi.ty.clone()
-//             },
-//             Symbol::Enum(_) => {
-//                 SymbolTable::ENUM_TYPE_SYMBOL_ID
-//             },
-//             Symbol::EnumInstance(ei) => {
-//                 ei.ty.clone()
-//             },
-//             Symbol::Function(_) => {
-//                 SymbolTable::UNDEFINED_SYMBOL_ID
-//             },
-//             Symbol::NativeFunction(_) => {
-//                 SymbolTable::UNDEFINED_SYMBOL_ID
-//             },
-//             Symbol::ValueType(_) => {
-//                 SymbolTable::VALUE_TYPE_SYMBOL_ID
-//                 
-//             },
-//             Symbol::Value(v) => {
-//                 match v {
-//                     Value::StringValue(_)  => SymbolTable::STRING_TYPE_SYMBOL_ID,
-//                     Value::IntegerValue(_) => SymbolTable::INT_TYPE_SYMBOL_ID,
-//                     Value::FloatValue(_)   => SymbolTable::FLOAT_TYPE_SYMBOL_ID,
-//                     Value::CharValue(_)    => SymbolTable::CHAR_TYPE_SYMBOL_ID,
-//                     Value::BooleanValue(_) => SymbolTable::BOOL_TYPE_SYMBOL_ID,
-//                 }
-//             },
-//             Symbol::TypeVariable(_) => {
-//                 SymbolTable::UNDEFINED_SYMBOL_ID
-//             }
-//             _ => unimplemented!(),
-//         }
-//     }
-// 
-//     pub fn is_type_variable(&self) -> bool {
-//         match self {
-//             Symbol::TypeVariable(_) => true,
-//             _ => false,
-//         }
-//     }
-// 
-//     pub fn is_unbound_type_variable(&self) -> bool {
-//         match self {
-//             Symbol::TypeVariable(Some(_)) => true,
-//             _ => false,
-//         }
-//     }
-// 
-//     pub fn is_a(lower_id: SymbolId, upper_id: SymbolId, table: &SymbolTable) -> bool {
-//         if lower_id == upper_id {
-//             return true;
-//         }
-// 
-//         let lower = table.load_symbol(lower_id);
-//         let lower_readable = lower.read().unwrap();
-// 
-//         match lower_readable.deref() {
-//             Symbol::Object(o) => {
-//                 o.vtables.contains_key(&upper_id)
-//             },
-//             Symbol::Enum(e) => {
-//                 e.vtables.contains_key(&upper_id)
-//             },
-//             _ => false,
-//         }
-//     }
-// }
+#[derive(Clone, Debug)]
+pub(crate) struct Array {
+    pub ty: KindHash,
+    pub length: u32,
+    pub values: Vec<Value>,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct Module {
@@ -937,7 +885,13 @@ impl KindHashable for FunctionSignature {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Function {
+pub(crate) enum Function {
+    PelFunction(PelFunction),
+    NativeFunction(NativeFunction),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PelFunction {
     pub parent: Reference,
     pub signature: KindHash,
     pub body: BlockBody,

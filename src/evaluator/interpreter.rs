@@ -17,6 +17,7 @@ use crate::evaluator::evaluator::{
     NativeFunction,
     Object,
     ObjectInstance,
+    PelFunction,
     VTables,
     VTable,
     KindTable,
@@ -144,7 +145,7 @@ impl Interpreter {
         let ce = if let parse_tree::Expression::ChainableExpressionNode(ce) = &expr {
             ce
         } else {
-            let message = format!("Cannot assign to a {}", expr);
+            let message = format!("Cannot assign to a {:?}", expr);
             panic!(message);
         };
 
@@ -351,23 +352,13 @@ impl Evaluator for Interpreter {
         enu.write().unwrap().variant_values = variant_values;
         enu.write().unwrap().methods = methods;
 
-        let item = Item::TypeReference(KindHash::clone(&enu_kind_hash));
-        let addr = self.heap.alloc();
-        self.heap.store(addr, item);
-        
-        let val = Value::Reference(Reference {
-            ty: KindHash::from(KIND_KIND_HASH_STR),
-            is_self: false,
-            address: addr,
-            size: std::u32::MAX,
-        });
-
+        let reference_to_enum = Value::create_type_reference(&enu_kind_hash, &self.heap);
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
         self.current_env = parent_env;
         self.current_env
             .write()
             .unwrap()
-            .define(enum_decl.type_name.clone(), val);
+            .define(enum_decl.type_name.clone(), reference_to_enum);
     }
 
     fn visit_object_declaration(&mut self, obj_decl: &parse_tree::ObjectDeclaration) {
@@ -399,26 +390,19 @@ impl Evaluator for Interpreter {
         let obj_kind_hash = obj.kind_hash(&self.kind_table);
         self.kind_table.create(Kind::Object(Arc::new(RwLock::new(obj))));
 
-        let obj_reference_addr = self.heap.alloc();
-        self.heap.store(obj_reference_addr, Item::TypeReference(KindHash::clone(&obj_kind_hash)));
-        let obj_reference = Value::Reference(Reference {
-            ty: KindHash::from(KIND_KIND_HASH_STR),
-            is_self: false,
-            address: obj_reference_addr,
-            size: std::u32::MAX,
-        });
+        let reference_to_obj = Value::create_type_reference(&obj_kind_hash, &self.heap);
 
         let methods = obj_decl.methods
             .iter()
             .map(|fd| {
-                self.stack.push(Value::clone(&obj_reference));
+                self.stack.push(Value::clone(&reference_to_obj));
                 self.visit_function_declaration(fd);
                 let func_val = self.current_env.read().unwrap().get_value_by_name(&fd.signature.name).unwrap();
                 (fd.signature.name.clone(), Value::clone(&func_val))
             })
             .collect();
 
-        let obj_arc = self.kind_table.load(&obj_kind_hash).to_object().unwrap();
+        let obj_arc = self.kind_table.load(&obj_kind_hash).unwrap().to_object().unwrap();
         obj_arc.write().unwrap().methods = methods;
 
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
@@ -426,7 +410,7 @@ impl Evaluator for Interpreter {
         self.current_env
             .write()
             .unwrap()
-            .define(obj_decl.type_name.clone(), obj_reference);
+            .define(obj_decl.type_name.clone(), reference_to_obj);
     }
 
     fn visit_contract_declaration(&mut self, contract_decl: &parse_tree::ContractDeclaration) {
@@ -445,19 +429,12 @@ impl Evaluator for Interpreter {
         let contract_kind_hash = contract.kind_hash(&self.kind_table);
         self.kind_table.create(Kind::Contract(Arc::new(RwLock::new(contract))));
 
-        let contract_ref_addr = self.heap.alloc();
-        self.heap.store(contract_ref_addr, Item::TypeReference(KindHash::clone(&contract_kind_hash)));
-        let contract_ref = Value::Reference(Reference {
-            ty: KindHash::from(KIND_KIND_HASH_STR),
-            is_self: false,
-            address: contract_ref_addr,
-            size: std::u32::MAX,
-        });
+        let reference_to_contract = Value::create_type_reference(&contract_kind_hash, &self.heap);
 
         let required_functions = contract_decl.functions
                 .iter()
                 .map(|fs| {
-                    self.stack.push(Value::clone(&contract_ref));
+                    self.stack.push(Value::clone(&reference_to_contract));
                     self.visit_function_signature(&fs);
                     self.stack.pop().unwrap().to_ref().unwrap().ty
                 })
@@ -471,7 +448,7 @@ impl Evaluator for Interpreter {
         self.current_env
             .write()
             .unwrap()
-            .define(contract_decl.type_name.clone(), contract_ref);
+            .define(contract_decl.type_name.clone(), reference_to_contract);
     }
 
     fn visit_implementation_declaration(&mut self, impl_decl: &parse_tree::ImplementationDeclaration) {
@@ -1284,6 +1261,15 @@ impl Callable<Interpreter> for Enum {
 }
 
 impl Callable<Interpreter> for Function {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+        match self {
+            Function::NativeFunction(nf) => nf.call(interpreter, args),
+            Function::PelFunction(pf)    => pf.call(interpreter, args),
+        }
+    }
+}
+
+impl Callable<Interpreter> for PelFunction {
     fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         let signature = interpreter.kind_table
             .load(&self.signature)

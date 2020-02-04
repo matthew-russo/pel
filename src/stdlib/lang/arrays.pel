@@ -1,6 +1,11 @@
 module Arrays {
   func <T> copy(src: [T], start: int, end: int, dst: [T], dst_start: int) {
+    let dst_ptr: int = dst_start;
 
+    for src_ptr: int := start; src_ptr < end; src_ptr := src_ptr + 1{
+      dst[dst_ptr] = src[src_ptr]
+      dst_ptr := dst_ptr + 1;
+    }
   }
 
   func <T> contains(src: [T], to_find: T) -> bool {
@@ -35,12 +40,28 @@ module Arrays {
   }
 
   func <T> subsequence(src: [T], begin: int, end: int) -> [T] {
-    for i: int := begin; i < end; i = i + 1 {
+    let subseq: [T] := [T; end - begin];
+    let subseq_ptr: int := 0
 
+    for src_ptr: int := begin; src_ptr < end; src_ptr := src_ptr + 1 {
+      subseq[subseq_ptr] := src[src_ptr];
+      subseq_ptr := subseq_ptr + 1;
     }
+
+    return subseq;
   }
 
   func <T> replace(src: [T], to_replace: T, to_replace_with: T) -> [T] {
+    let new_arr: [T] := [T; end - begin];
 
+    for i: int := begin; i < end; i := i + 1 {
+      if opts::cmp::Equal(src[i], to_replace) {
+        new_arr[i] := to_replace_with;
+      } else {
+        new_arr[i] := src[i];
+      }
+    }
+
+    return new_arr;
   }
 }

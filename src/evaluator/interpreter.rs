@@ -14,21 +14,22 @@ use crate::evaluator::evaluator::{
     Function,
     FunctionSignature,
     Heap,
-    NativeFunction,
-    Object,
-    ObjectInstance,
-    PelFunction,
-    VTables,
-    VTable,
+    Item,
     KindTable,
     Kind,
     KindHash,
     KindHashable,
     KIND_KIND_HASH_STR,
-    Value,
-    Scalar,
+    Module,
+    NativeFunction,
+    Object,
+    ObjectInstance,
+    PelFunction,
     Reference,
-    Item,
+    Scalar,
+    Value,
+    VTables,
+    VTable,
 };
 
 //        -- environment --            ----- state -----
@@ -74,7 +75,15 @@ impl Interpreter {
         let heap = Heap::new();
 
         let mut kind_table = KindTable::new();
-        let main_mod = kind_table.load(KindTable::MAIN_MODULE_SYMBOL_ID).unwrap().to_module().unwrap();
+
+        let mut main_env = Arc::new(RwLock::new(Environment::root()));
+
+        let main_mod = Arc::new(RwLock::new(Module {
+            parent: None,
+            name: "main".into(),
+            env: Arc::clone(&main_env),
+        }));
+        kind_table.create(Kind::Module(main_mod));
 
         let root_env = Arc::clone(&main_mod.read().unwrap().env);
 
@@ -82,7 +91,7 @@ impl Interpreter {
             kind_table,
             heap,
             vtables: VTables::new(),
-            global_env: Arc::clone(&root_env),
+            global_env: main_env,
             current_env: root_env,
             stack: Vec::new(),
             exiting: false,
@@ -136,12 +145,7 @@ impl Interpreter {
             .collect()
     }
 
-    fn resolve_value(&mut self, expr: &parse_tree::Expression) -> Address {
-        // this can be:
-        //      new var name
-        //      preexisting var name
-        //      field name
-        
+    fn resolve_var_name(&mut self, expr: &parse_tree::Expression) -> Option<Value> {
         let ce = if let parse_tree::Expression::ChainableExpressionNode(ce) = &expr {
             ce
         } else {
@@ -149,34 +153,57 @@ impl Interpreter {
             panic!(message);
         };
 
-        // check if single name
-        //    -> either new var and need to alloc
-        //    -> or preexisting var and return ref addr
-        
-        // otherwise we need to evalute the chain to a field
+        if !ce.chained.is_empty() {
+            return None;
+        }
 
-        // OLD CODE
-        // if !ce.chained.is_empty() {
-        //     return None;
-        // }
+        let var = if let ExpressionStart::VariableNode(var) = &ce.start {
+            var
+        } else {
+            return None;
+        };
 
-        // let var = if let ExpressionStart::VariableNode(var) = &ce.start {
-        //     var
-        // } else {
-        //     return None;
-        // };
+        let var_name = match var {
+            Variable::Name(n) => n.clone(),
+            // Variable::SelfVariable => SELF_VAR_SYMBOL_NAME.into(),
+            // Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
+        };
 
-        // let var_name = match var {
-        //     Variable::Name(n) => n.clone(),
-        //     Variable::SelfVariable => SELF_VAR_SYMBOL_NAME.into(),
-        //     Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
-        // };
+        if let Some(val) = self.current_env.read().unwrap().get_value_by_name(&var_name) {
+            Some(val) 
+        } else {
+            // TODO: allocate new address and return
+            None
+        }
+    }
 
-        // if let None = self.current_env.read().unwrap().get_symbol_by_name(&var_name) {
-        //     Some(var_name) 
-        // } else {
-        //     None
-        // }
+    fn resolve_field_access(&mut self, expr: &parse_tree::Expression) -> Option<Value> {
+
+    }
+
+    fn resolve_array_access(&mut self, expr: &parse_tree::Expression) -> Option<Value> {
+
+    }
+
+    // TODO -> LValues? RValues? Is it worth it?
+    // TODO -> make a trait called `Assignable`. Then part of type checking
+    //             will determine whether an Expression is `Assignable`?
+    fn resolve_value(&mut self, expr: &parse_tree::Expression) -> Value {
+        // this can be:
+        //      new var name
+        //      preexisting var name
+        //      field name
+        //      array slot
+
+        if let Some(val) = self.resolve_var_name(expr) {
+            val
+        } else if let Some(val) = self.resolve_field_access(expr) {
+            val
+        } else if let Some(val) = self.resolve_array_access(expr) {
+            val
+        } else {
+            panic!("unable to resolve expression to address: {:?}", expr);
+        }
     }
 }
 
@@ -241,7 +268,7 @@ impl Evaluator for Interpreter {
             .collect();
 
         let mut enu = Enum {
-            parent: KindTable::MAIN_MODULE_SYMBOL_ID,
+            parent: Module::MAIN_MODULE_KIND_HASH,
             name: enum_decl.type_name.clone(),
             type_arguments,
             variant_tys,
@@ -274,7 +301,7 @@ impl Evaluator for Interpreter {
                         let does_contain_ty = args[2].to_scalar().unwrap().to_bool().unwrap();
 
                         let contains = if does_contain_ty {
-                            let contains_kind_hash = self.heap.load(args[3].to_ref().unwrap().address);
+                            let contains_kind_hash = self.heap.load_type_reference(args[3].to_ref().unwrap().address).unwrap();
 
                             let contains_ref = args[4].to_ref().unwrap();
 
@@ -286,7 +313,7 @@ impl Evaluator for Interpreter {
                                 panic!(message);
                             }
 
-                            Some(Reference::clone(contains_ref))
+                            Some(Reference::clone(&contains_ref))
                         } else {
                             None
                         };
@@ -294,7 +321,7 @@ impl Evaluator for Interpreter {
                         let enum_instance = EnumInstance {
                             ty: enu_kind_hash,
                             contract_ty: None,
-                            variant: (variant_name, contains),
+                            variant: (variant_name, Some(Value::Reference(contains))),
                         };
 
                         let addr = self.heap.alloc();
@@ -312,7 +339,6 @@ impl Evaluator for Interpreter {
 
                     let nat_func = NativeFunction {
                         name: "".into(),
-                        args: Vec::new(),
                         func: enum_constructor,
                     };
 
@@ -352,7 +378,7 @@ impl Evaluator for Interpreter {
         enu.write().unwrap().variant_values = variant_values;
         enu.write().unwrap().methods = methods;
 
-        let reference_to_enum = Value::create_type_reference(&enu_kind_hash, &self.heap);
+        let reference_to_enum = Value::create_type_reference(enu_kind_hash, &self.heap);
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
         self.current_env = parent_env;
         self.current_env
@@ -379,7 +405,7 @@ impl Evaluator for Interpreter {
             .collect();
 
         let obj = Object {
-            parent: Reference::clone(main_module_reference),
+            parent: Module::MAIN_MODULE_KIND_HASH,
             name: obj_decl.type_name.clone(),
             type_arguments,
             fields,
@@ -390,7 +416,7 @@ impl Evaluator for Interpreter {
         let obj_kind_hash = obj.kind_hash(&self.kind_table);
         self.kind_table.create(Kind::Object(Arc::new(RwLock::new(obj))));
 
-        let reference_to_obj = Value::create_type_reference(&obj_kind_hash, &self.heap);
+        let reference_to_obj = Value::create_type_reference(obj_kind_hash, &self.heap);
 
         let methods = obj_decl.methods
             .iter()
@@ -420,7 +446,7 @@ impl Evaluator for Interpreter {
         let type_arguments = self.generate_type_holes(&contract_decl.type_params);
 
         let contract = Contract {
-            parent: KindTable::MAIN_MODULE_SYMBOL_ID,
+            parent: Module::MAIN_MODULE_KIND_HASH,
             name: contract_decl.type_name.clone(),
             type_arguments,
             required_functions: Vec::new(),
@@ -429,7 +455,7 @@ impl Evaluator for Interpreter {
         let contract_kind_hash = contract.kind_hash(&self.kind_table);
         self.kind_table.create(Kind::Contract(Arc::new(RwLock::new(contract))));
 
-        let reference_to_contract = Value::create_type_reference(&contract_kind_hash, &self.heap);
+        let reference_to_contract = Value::create_type_reference(contract_kind_hash, &self.heap);
 
         let required_functions = contract_decl.functions
                 .iter()
@@ -524,32 +550,35 @@ impl Evaluator for Interpreter {
         let implementing_functions_by_name: HashMap<String, Value> = impl_decl.functions
             .iter()
             .map(|fd| {
-                self.stack.push(KindHash::clone(&implementor_kind_hash));
+                self.stack.push(Value::create_type_reference(implementor_kind_hash, &self.heap));
                 self.visit_function_declaration(fd);
-                let func_val = self.current_env.get_value_by_name(&fd.signature.name);
+                let func_val = self.current_env.read().unwrap().get_value_by_name(&fd.signature.name).unwrap();
                
                 // TODO -> need to define in env?
                
-                (impl_sig.name.clone(), Value::clone(func_val))
+                (impl_sig.name.clone(), Value::clone(&func_val))
             })
             .collect();
 
-        for (req_name, req_sig) in required_functions_by_name.iter() {
+        for (req_name, req_sig_hash) in required_functions_by_name.iter() {
             if !implementing_functions_by_name.contains_key(req_name) {
                 let message = format!("Contract implementation for {} by {} requires function {}",
                                       contract_kind_hash,
                                       implementor_kind_hash,
-                                      req_sig.kind_hash(&self.kind_table).unwrap());
+                                      req_sig_hash);
                 panic!(message);
             }
 
             let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap().to_ref().unwrap();
+            let implementor_func = self.heap.load(implementor_func_ref.address).to_function().unwrap();
+            let req_sig = self.kind_table.load(req_sig_hash).unwrap().to_func_sig().unwrap();
+            let implementor_sig = self.kind_table.load(&implementor_func.read().unwrap().to_pel_function().unwrap().read().unwrap().signature).unwrap().to_func_sig().unwrap();
 
-            if !req_sig.is_compatible_with(&implementor_func_ref.ty, &self.kind_table) {
+            if !req_sig.read().unwrap().is_compatible_with(implementor_sig.read().unwrap().deref(), &self.kind_table) {
                 let message = format!("Function with name: {} has signature: {} but expected: {}",
                                       req_name,
-                                      req_sig.kind_hash(&self.kind_table).unwrap(),
-                                      implementor_func_ref.ty);
+                                      req_sig_hash,
+                                      implementor_func.read().unwrap().to_pel_function().unwrap().read().unwrap().signature);
                 panic!(message);
             }
         }
@@ -607,7 +636,7 @@ impl Evaluator for Interpreter {
 
         let func = Function {
             // TODO -> remove this and pass module context in
-            parent: KindTable::MAIN_MODULE_SYMBOL_ID,
+            parent: Module::MAIN_MODULE_KIND_HASH,
             signature: func_sig_kind_hash,
             body: func_decl.body.clone(),
             // TODO -> this should be a deep clone i think
@@ -1263,8 +1292,8 @@ impl Callable<Interpreter> for Enum {
 impl Callable<Interpreter> for Function {
     fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         match self {
-            Function::NativeFunction(nf) => nf.call(interpreter, args),
-            Function::PelFunction(pf)    => pf.call(interpreter, args),
+            Function::NativeFunction(nf_arc) => nf_arc.read().unwrap().call(interpreter, args),
+            Function::PelFunction(pf_arc)    => pf_arc.read().unwrap().call(interpreter, args),
         }
     }
 }

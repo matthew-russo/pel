@@ -330,8 +330,8 @@ impl Scalar {
     }
 }
 
-impl std::convert::From<crate::syntax::parse_tree::Value> for Scalar {
-    fn from(parse_value: crate::syntax::parse_tree::Value) -> Self {
+impl std::convert::From<&crate::syntax::parse_tree::Value> for Scalar {
+    fn from(parse_value: &crate::syntax::parse_tree::Value) -> Self {
         match parse_value {
             crate::syntax::parse_tree::Value::BooleanValue(b) => Scalar::Boolean(b),
             crate::syntax::parse_tree::Value::CharValue(c)    => Scalar::Char(c),
@@ -771,6 +771,10 @@ pub(crate) struct Module {
     pub env: Arc<RwLock<Environment>>,
 }
 
+impl Module {
+    pub const MAIN_MODULE_KIND_HASH: KindHash = "main".into();
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Contract {
     pub parent: KindHash,
@@ -886,8 +890,24 @@ impl KindHashable for FunctionSignature {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Function {
-    PelFunction(PelFunction),
-    NativeFunction(NativeFunction),
+    PelFunction(Arc<RwLock<PelFunction>>),
+    NativeFunction(Arc<RwLock<NativeFunction>>),
+}
+
+impl Function {
+    pub fn to_pel_function(&self) -> Option<Arc<RwLock<PelFunction>>> {
+        match self {
+            Function::PelFunction(pf_arc) => Some(Arc::clone(pf_arc)),
+            _ => None
+        }
+    }
+
+    pub fn to_native_function(&self) -> Option<Arc<RwLock<NativeFunction>>> {
+        match self {
+            Function::NativeFunction(nat_arc) => Some(Arc::clone(nat_arc)),
+            _ => None
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -46,8 +46,8 @@ pub(super) fn prelude(kind_table: &mut KindTable, heap: &mut Heap) -> HashMap<St
     env
 }
 
-fn print_nat_fn() -> NativeFunction {
-    NativeFunction {
+fn print_nat_fn() -> Arc<RwLock<NativeFunction>> {
+    Arc::new(RwLock::new(NativeFunction {
         name: "print".into(),
         func: |interp: &mut Interpreter, args: Vec<Value>| {
             if args.len() != 1 {
@@ -74,6 +74,6 @@ fn print_nat_fn() -> NativeFunction {
             println!("{}", rust_str);
             None
         },
-    }
+    }))
 }
 

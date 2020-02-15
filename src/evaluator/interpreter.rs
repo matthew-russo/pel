@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::syntax::parse_tree;
 use crate::evaluator::pel_utils;
+use crate::evaluator::prelude;
 use crate::evaluator::evaluator::{
     Address,
     Callable,
@@ -75,11 +76,12 @@ const SELF_TYPE_SYMBOL_NAME: &str = "Self";
 
 impl Interpreter {
     pub fn new() -> Self {
-        let heap = Heap::new();
+        let mut heap = Heap::new();
 
         let mut kind_table = KindTable::new();
 
         let main_env = Arc::new(RwLock::new(Environment::root()));
+        main_env.write().unwrap().overwrite_with(prelude::prelude(&mut kind_table, &mut heap));
 
         let main_mod = Arc::new(RwLock::new(Module {
             parent: None,
@@ -822,16 +824,21 @@ impl Evaluator for Interpreter {
                 let var_val = match self.current_env.read().unwrap().get_value_by_name(&name) {
                     Some(val) => Value::clone(&val),
                     None => {
-                        let message = format!("unknown symbol {:?}", name);
-                        panic!(message);
+                        println!("ENV: {:?}", self.current_env.read().unwrap());
+                        panic!("unknown symbol {:?}", name);
                     }
                 };
 
                 self.stack.push(var_val);
             }
             ValueNode(ref value) => {
-                let val = Value::Scalar(Scalar::from(value));
-                self.stack.push(val);
+                if let parse_tree::Value::StringValue(s) = value {
+                    let str_ref = pel_utils::rust_string_to_pel_string(s, &mut self.heap);
+                    self.stack.push(Value::Reference(str_ref));
+                } else {
+                    let val = Value::Scalar(Scalar::from(value));
+                    self.stack.push(val);
+                }
             }
         };
 
@@ -1008,7 +1015,7 @@ impl Evaluator for Interpreter {
                                 },
                                 Item::Function(ref func) => {
                                     self.stack.push(Value::clone(&to_access_value));
-                                    let var_name = pel_utils::rust_string_to_pel_string(String::clone(&mod_access.name), &mut self.heap);
+                                    let var_name = pel_utils::rust_string_to_pel_string(&mod_access.name, &mut self.heap);
                                     self.stack.push(Value::Reference(var_name));
 
                                     // third arg is whether it contains a type

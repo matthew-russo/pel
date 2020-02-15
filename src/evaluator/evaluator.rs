@@ -198,8 +198,10 @@ impl Clone for Item {
         use Item::*;
 
         match self {
+            Array(ref arr_arc)           => Array(Arc::clone(arr_arc)),
             ObjectInstance(ref oi_arc)   => ObjectInstance(Arc::clone(oi_arc)),
             EnumInstance(ref ei_arc)     => EnumInstance(Arc::clone(ei_arc)),
+            Function(ref func)           => Function(func.clone()),
             ModuleReference(ref kh)      => ModuleReference(KindHash::clone(kh)),
             TypeReference(ref kh)        => TypeReference(KindHash::clone(kh)),
             _ => unimplemented!("oh no"),
@@ -379,7 +381,7 @@ impl std::convert::From<&crate::syntax::parse_tree::Value> for Scalar {
             crate::syntax::parse_tree::Value::CharValue(c)    => Scalar::Char(*c),
             crate::syntax::parse_tree::Value::IntegerValue(i) => Scalar::Integer(*i),
             crate::syntax::parse_tree::Value::FloatValue(f)   => Scalar::Float(*f),
-            _ => unimplemented!("huh?"),
+            v => unimplemented!("unknown syntax Value variant: {:?}", v),
         }
     }
 }
@@ -617,8 +619,9 @@ impl KindHashable for Kind {
             Kind::Contract(c) => c.read().unwrap().kind_hash(kind_table),
             Kind::Module(m)   => m.read().unwrap().kind_hash(kind_table),
             Kind::FunctionSignature(fs) => fs.read().unwrap().kind_hash(kind_table),
+            Kind::ScalarType(st) => st.kind_hash(),
             Kind::Type(kh)    => KindHash::clone(kh),
-            _ => unimplemented!("what?"),
+            k => unimplemented!("unknown kind: {:?}", k),
         }
     }
 }

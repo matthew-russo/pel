@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use crate::evaluator::evaluator::{Array, Heap, HeapReference, KindHash, Item, ObjectInstance, Reference, Scalar, Value};
 use crate::evaluator::prelude::{CHAR_TY, STRING_TY, STRING_FIELD};
 
-pub(crate) fn rust_string_to_pel_string(input: String, heap: &mut Heap) -> Reference {
+pub(crate) fn rust_string_to_pel_string(input: &String, heap: &mut Heap) -> Reference {
     let arr_ref = alloc_array(input.chars().collect(), heap);
     alloc_obj_instance(arr_ref, heap)
 }

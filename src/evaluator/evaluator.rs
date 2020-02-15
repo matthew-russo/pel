@@ -39,31 +39,31 @@ pub(crate) enum Value {
 }
 
 impl Value {
-    pub fn create_type_reference(kind_hash: KindHash, heap: &Heap) -> Self {
+    pub fn create_type_reference(kind_hash: KindHash, heap: &mut Heap) -> Self {
         let item = Item::TypeReference(KindHash::clone(&kind_hash));
         let addr = heap.alloc();
         heap.store(addr, item);
         
-        Value::Reference(Reference {
+        Value::Reference(Reference::HeapReference(HeapReference {
             ty: KindHash::from(KIND_KIND_HASH_STR),
             is_self: false,
             address: addr,
             size: std::u32::MAX,
-        })
+        }))
     }
 
-    pub fn create_function(function: Function, kind_table: &KindTable, heap: &Heap) -> Self {
+    pub fn create_function(function: Function, kind_table: &KindTable, heap: &mut Heap) -> Self {
         let kind_hash = function.kind_hash(kind_table);
-        let print_func = Item::Function(Arc::new(RwLock::new(function)));
+        let func = Item::Function(function);
         let addr = heap.alloc();
-        heap.store(addr, print_func);
+        heap.store(addr, func);
         
-        Value::Reference(Reference {
+        Value::Reference(Reference::HeapReference(HeapReference {
             ty: kind_hash,
             is_self: false,
             address: addr,
             size: std::u32::MAX,
-        })
+        }))
     }
 
     pub fn to_ref(&self) -> Option<Reference> {
@@ -83,7 +83,7 @@ impl Value {
     pub fn get_ty(&self) -> KindHash {
         match self {
             Value::Reference(Reference::StackReference(r)) => r.ty.kind_hash(),
-            Value::Reference(Reference::HeapReference(r)) => r.ty,
+            Value::Reference(Reference::HeapReference(r)) => KindHash::clone(&r.ty),
             Value::Scalar(s) => {
                 match s {
                     Scalar::Boolean(_) => ScalarType::bool_kind_hash(),
@@ -116,6 +116,17 @@ impl Reference {
         match self {
             Reference::HeapReference(r) => Some(r),
             _ => None,
+        }
+    }
+
+    pub fn get_ty(&self) -> KindHash {
+        match self {
+            Reference::StackReference(r) => {
+                r.ty.kind_hash()
+            },
+            Reference::HeapReference(r) => {
+                KindHash::clone(&r.ty)
+            }
         }
     }
 }
@@ -160,9 +171,9 @@ impl Item {
         }
     }
 
-    pub fn to_function(&self) -> Option<Arc<RwLock<Function>>> {
+    pub fn to_function(&self) -> Option<Function> {
         match self {
-            Item::Function(func_arc) => Some(Arc::clone(func_arc)),
+            Item::Function(func) => Some(Function::clone(func)),
             _ => None,
         }
     }
@@ -191,6 +202,7 @@ impl Clone for Item {
             EnumInstance(ref ei_arc)     => EnumInstance(Arc::clone(ei_arc)),
             ModuleReference(ref kh)      => ModuleReference(KindHash::clone(kh)),
             TypeReference(ref kh)        => TypeReference(KindHash::clone(kh)),
+            _ => unimplemented!("oh no"),
         }
     }
 }
@@ -363,10 +375,11 @@ impl Scalar {
 impl std::convert::From<&crate::syntax::parse_tree::Value> for Scalar {
     fn from(parse_value: &crate::syntax::parse_tree::Value) -> Self {
         match parse_value {
-            crate::syntax::parse_tree::Value::BooleanValue(b) => Scalar::Boolean(b),
-            crate::syntax::parse_tree::Value::CharValue(c)    => Scalar::Char(c),
-            crate::syntax::parse_tree::Value::IntegerValue(i) => Scalar::Integer(i),
-            crate::syntax::parse_tree::Value::FloatValue(f)   => Scalar::Float(f),
+            crate::syntax::parse_tree::Value::BooleanValue(b) => Scalar::Boolean(*b),
+            crate::syntax::parse_tree::Value::CharValue(c)    => Scalar::Char(*c),
+            crate::syntax::parse_tree::Value::IntegerValue(i) => Scalar::Integer(*i),
+            crate::syntax::parse_tree::Value::FloatValue(f)   => Scalar::Float(*f),
+            _ => unimplemented!("huh?"),
         }
     }
 }
@@ -405,6 +418,13 @@ impl Heap {
 
     pub fn store(&mut self, addr: Address, item: Item) {
         self.items.insert(addr, item);
+    }
+
+    pub fn load_array(&self, addr: Address) -> Option<Arc<RwLock<Array>>> {
+        match self.load(addr) {
+            Item::Array(ref array_arc) => Some(Arc::clone(array_arc)),
+            _ => None,
+        }
     }
 
     pub fn load_object_instance(&self, addr: Address) -> Option<Arc<RwLock<ObjectInstance>>> {
@@ -598,6 +618,7 @@ impl KindHashable for Kind {
             Kind::Module(m)   => m.read().unwrap().kind_hash(kind_table),
             Kind::FunctionSignature(fs) => fs.read().unwrap().kind_hash(kind_table),
             Kind::Type(kh)    => KindHash::clone(kh),
+            _ => unimplemented!("what?"),
         }
     }
 }
@@ -616,7 +637,7 @@ impl KindHashable for Object {
             String::new()
         };
         
-        [self.parent, self.name.clone(), to_append].join("::")
+        [KindHash::clone(&self.parent), self.name.clone(), to_append].join("::")
 
     }
 }
@@ -635,7 +656,7 @@ impl KindHashable for Enum {
             String::new()
         };
         
-        [self.parent, self.name.clone(), to_append].join("::")
+        [KindHash::clone(&self.parent), self.name.clone(), to_append].join("::")
     }
 }
 
@@ -653,7 +674,7 @@ impl KindHashable for Contract {
             String::new()
         };
         
-        [self.parent, self.name.clone(), to_append].join("::")
+        [KindHash::clone(&self.parent), self.name.clone(), to_append].join("::")
     }
 }
 
@@ -672,8 +693,8 @@ impl KindHashable for Module {
 impl KindHashable for Function {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
         match self {
-            Function::NativeFunction(nf) => nf.kind_hash(kind_table),
-            Function::PelFunction(pf) => pf.kind_hash(kind_table),
+            Function::NativeFunction(nf) => nf.read().unwrap().kind_hash(kind_table),
+            Function::PelFunction(pf) => pf.read().unwrap().kind_hash(kind_table),
         }
     }
 }
@@ -686,7 +707,7 @@ impl KindHashable for NativeFunction {
 
 impl KindHashable for PelFunction {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        [self.parent.ty, self.signature].join("::")
+        [KindHash::clone(&self.parent), KindHash::clone(&self.signature)].join("::")
     }
 }
 
@@ -787,12 +808,12 @@ impl Environment {
 
     pub fn get_value_by_name(&self, name: &String) -> Option<Value> {
         if self.locals.contains_key(name) {
-            let sym_id = self.locals.get(name).unwrap();
-            return Some(*sym_id);
+            let value = self.locals.get(name).unwrap();
+            return Some(Value::clone(value));
         }
 
         match self.parent {
-            Some(ref p) => p.read().unwrap().get_symbol_by_name(name),
+            Some(ref p) => p.read().unwrap().get_value_by_name(name),
             None => None
         }
     }
@@ -813,7 +834,7 @@ pub(crate) struct Module {
 }
 
 impl Module {
-    pub const MAIN_MODULE_KIND_HASH: KindHash = "main".into();
+    pub const MAIN_MODULE_KIND_HASH: &'static str = "main";
 }
 
 #[derive(Clone, Debug)]
@@ -847,7 +868,7 @@ pub(crate) struct Enum {
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
     pub variant_tys: HashMap<String, Option<KindHash>>,
-    pub variant_values: HashMap<String, Address>,
+    pub variant_values: HashMap<String, Reference>,
     pub methods: HashMap<String, Value>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
 }
@@ -885,8 +906,8 @@ impl FunctionSignature {
             }
         }
 
-        if let Some(ret_id) = self.returns {
-            if let Some(other_ret_id) = other.returns {
+        if let Some(ref ret_id) = self.returns {
+            if let Some(ref other_ret_id) = other.returns {
                 return Kind::is_a(&other_ret_id, &ret_id, table);
             } else {
                 return false;
@@ -921,7 +942,7 @@ impl KindHashable for FunctionSignature {
         };
 
         let returns = match self.returns {
-            Some(kh) => format!(" -> {}", kh),
+            Some(ref kh) => format!(" -> {}", kh),
             None => String::new(),
         };
         
@@ -947,6 +968,13 @@ impl Function {
         match self {
             Function::NativeFunction(nat_arc) => Some(Arc::clone(nat_arc)),
             _ => None
+        }
+    }
+
+    pub fn signature(&self, kind_table: &KindTable) -> Option<Arc<RwLock<FunctionSignature>>> {
+        match self {
+            Function::PelFunction(pf) => kind_table.load(&pf.read().unwrap().signature).unwrap().to_func_sig(),
+            _ => None,
         }
     }
 }

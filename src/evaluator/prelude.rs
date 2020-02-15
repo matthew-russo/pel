@@ -16,31 +16,39 @@ use super::evaluator::{
 use super::interpreter::Interpreter;
 use super::pel_utils;
 
-const STRING_TY: &str = "pel::lang::String";
+pub const BOOL_TY:   &str = "bool";
+pub const CHAR_TY:   &str = "char";
+pub const INT_TY:    &str = "int";
+pub const LONG_TY:   &str = "long";
+pub const FLOAT_TY:  &str = "float";
+pub const DOUBLE_TY: &str = "double";
+
+pub const STRING_TY: &str = "pel::lang::String";
+pub const STRING_FIELD: &str = "internal";
 
 pub(super) fn prelude(kind_table: &mut KindTable, heap: &mut Heap) -> HashMap<String, Value> {
     let mut env = HashMap::new();
 
     kind_table.create(Kind::ScalarType(ScalarType::BoolType));
-    env.insert(String::from("bool"), Value::create_type_reference(ScalarType::bool_kind_hash(), &heap));
+    env.insert(BOOL_TY.into(), Value::create_type_reference(ScalarType::bool_kind_hash(), heap));
 
     kind_table.create(Kind::ScalarType(ScalarType::CharType));
-    env.insert(String::from("char"), Value::create_type_reference(ScalarType::char_kind_hash(), &heap));
+    env.insert(CHAR_TY.into(), Value::create_type_reference(ScalarType::char_kind_hash(), heap));
 
     kind_table.create(Kind::ScalarType(ScalarType::IntegerType));
-    env.insert(String::from("int"), Value::create_type_reference(ScalarType::int_kind_hash(), &heap));
+    env.insert(INT_TY.into(), Value::create_type_reference(ScalarType::int_kind_hash(), heap));
 
     kind_table.create(Kind::ScalarType(ScalarType::LongType));
-    env.insert(String::from("long"), Value::create_type_reference(ScalarType::long_kind_hash(), &heap));
+    env.insert(LONG_TY.into(), Value::create_type_reference(ScalarType::long_kind_hash(), heap));
 
     kind_table.create(Kind::ScalarType(ScalarType::FloatType));
-    env.insert(String::from("float"), Value::create_type_reference(ScalarType::float_kind_hash(), &heap));
+    env.insert(FLOAT_TY.into(), Value::create_type_reference(ScalarType::float_kind_hash(), heap));
 
     kind_table.create(Kind::ScalarType(ScalarType::DoubleType));
-    env.insert(String::from("double"), Value::create_type_reference(ScalarType::double_kind_hash(), &heap));
+    env.insert(DOUBLE_TY.into(), Value::create_type_reference(ScalarType::double_kind_hash(), heap));
 
    
-    let print_func_val = Value::create_function(Function::NativeFunction(print_nat_fn()), &kind_table, &heap);
+    let print_func_val = Value::create_function(Function::NativeFunction(print_nat_fn()), &kind_table, heap);
     env.insert("print".into(), print_func_val);
 
     env
@@ -58,20 +66,16 @@ fn print_nat_fn() -> Arc<RwLock<NativeFunction>> {
                 panic!(message);
             }
 
-            let reference = args[0].to_ref().unwrap();
-            if reference.ty != KindHash::from(STRING_TY) {
-                panic!("expected an instance of String but got: {:?}", reference.ty);
+            let arg_ref = args[0].to_ref().unwrap();
+            let arg_heap_ref = arg_ref.to_heap_ref().unwrap();
+            let item = interp.heap.load(arg_heap_ref.address);
+            let maybe_rust_str = pel_utils::pel_string_to_rust_string(&item, &mut interp.heap);
+            if let Some(rust_str) = maybe_rust_str {
+                println!("{}", rust_str);
+            } else {
+                println!("expected a string argument but got: {}", arg_heap_ref.ty);
             }
 
-            let obj_instance_arc = interp.heap.load(reference.address).to_object_instance().unwrap();
-            let char_array = obj_instance_arc
-                .read()
-                .unwrap()
-                .fields
-                .get("internal")
-                .unwrap();
-            let rust_str = pel_utils::pel_char_array_to_rust_string(char_array);
-            println!("{}", rust_str);
             None
         },
     }))

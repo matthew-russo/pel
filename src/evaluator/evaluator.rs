@@ -82,7 +82,8 @@ impl Value {
 
     pub fn get_ty(&self) -> KindHash {
         match self {
-            Value::Reference(r) => r.ty,
+            Value::Reference(Reference::StackReference(r)) => r.ty.kind_hash(),
+            Value::Reference(Reference::HeapReference(r)) => r.ty,
             Value::Scalar(s) => {
                 match s {
                     Scalar::Boolean(_) => ScalarType::bool_kind_hash(),
@@ -98,7 +99,36 @@ impl Value {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Reference {
+pub(crate) enum Reference {
+    StackReference(StackReference),
+    HeapReference(HeapReference),
+}
+
+impl Reference {
+    pub fn to_stack_ref(&self) -> Option<&StackReference> {
+        match self {
+            Reference::StackReference(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn to_heap_ref(&self) -> Option<&HeapReference> {
+        match self {
+            Reference::HeapReference(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StackReference {
+    pub ty: ScalarType,
+    pub index: usize,
+    pub size: u32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct HeapReference {
     pub ty: KindHash,
     pub is_self: bool,
     pub address: Address,
@@ -110,7 +140,7 @@ pub(crate) enum Item {
     Array(Arc<RwLock<Array>>),
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
-    Function(Arc<RwLock<Function>>),
+    Function(Function),
     ModuleReference(KindHash),
     TypeReference(KindHash),
 }
@@ -515,6 +545,17 @@ pub(crate) enum ScalarType {
 }
 
 impl ScalarType {
+    pub fn kind_hash(&self) -> KindHash {
+        match self {
+            ScalarType::CharType    => Self::char_kind_hash(),
+            ScalarType::BoolType    => Self::bool_kind_hash(),
+            ScalarType::IntegerType => Self::int_kind_hash(),
+            ScalarType::LongType    => Self::long_kind_hash(),
+            ScalarType::FloatType   => Self::float_kind_hash(),
+            ScalarType::DoubleType  => Self::double_kind_hash(),
+        }
+    }
+
     pub fn bool_kind_hash() -> KindHash {
         KindHash::from("bool")
     }
@@ -912,7 +953,7 @@ impl Function {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PelFunction {
-    pub parent: Reference,
+    pub parent: KindHash,
     pub signature: KindHash,
     pub body: BlockBody,
     pub environment: Arc<RwLock<Environment>>,

@@ -14,6 +14,7 @@ use crate::evaluator::evaluator::{
     Function,
     FunctionSignature,
     Heap,
+    HeapReference,
     Item,
     KindTable,
     Kind,
@@ -27,6 +28,7 @@ use crate::evaluator::evaluator::{
     PelFunction,
     Reference,
     Scalar,
+    StackReference,
     Value,
     VTables,
     VTable,
@@ -301,9 +303,9 @@ impl Evaluator for Interpreter {
                         let does_contain_ty = args[2].to_scalar().unwrap().to_bool().unwrap();
 
                         let contains = if does_contain_ty {
-                            let contains_kind_hash = self.heap.load_type_reference(args[3].to_ref().unwrap().address).unwrap();
+                            let contains_kind_hash = self.heap.load_type_reference(args[3].to_ref().unwrap().to_heap_ref().unwrap().address).unwrap();
 
-                            let contains_ref = args[4].to_ref().unwrap();
+                            let contains_ref = args[4].to_ref().unwrap().to_heap_ref().unwrap();
 
                             if contains_ref.ty != contains_kind_hash {
                                 let message = format!("expected enum variant: {} to contain type {:?}, but got {}",
@@ -328,21 +330,21 @@ impl Evaluator for Interpreter {
                         let enum_item = Item::EnumInstance(Arc::new(RwLock::new(enum_instance)));
                         self.heap.store(addr, enum_item);
 
-                        let reference = Reference {
+                        let reference = Reference::HeapReference(HeapReference {
                             ty: enu_kind_hash,
                             is_self: false,
                             address: addr,
                             size: std::u32::MAX,
-                        };
+                        });
                         self.stack.push(Value::Reference(reference));
                     };
 
-                    let nat_func = NativeFunction {
+                    let nat_func = Function::NativeFunction(Arc::new(RwLock::new(NativeFunction {
                         name: "".into(),
                         func: enum_constructor,
-                    };
+                    })));
 
-                    (vd.name.clone(), Kind::NativeFunction(nat_func))
+                    (vd.name.clone(), Item::Function(nat_func))
                 }
             })
             .collect();
@@ -462,7 +464,7 @@ impl Evaluator for Interpreter {
                 .map(|fs| {
                     self.stack.push(Value::clone(&reference_to_contract));
                     self.visit_function_signature(&fs);
-                    self.stack.pop().unwrap().to_ref().unwrap().ty
+                    self.stack.pop().unwrap().to_ref().unwrap().to_heap_ref().unwrap().ty
                 })
                 .collect();
 
@@ -482,14 +484,14 @@ impl Evaluator for Interpreter {
         self.current_env = Arc::new(RwLock::new(local_env));
 
         self.visit_expression(&impl_decl.implementing_type);
-        let implementor_type_ref = self.stack.pop().unwrap().to_ref().unwrap();
+        let implementor_type_ref = self.stack.pop().unwrap().to_ref().unwrap().to_heap_ref().unwrap();
         if implementor_type_ref.ty != KindHash::from(KIND_KIND_HASH_STR) {
             panic!("implementor type must be a reference to a kind but got {}", implementor_type_ref.ty);
         }
         let implementor_kind_hash = self.heap.load_type_reference(implementor_type_ref.address).unwrap();
 
         self.visit_expression(&impl_decl.contract);
-        let contract_type_ref = self.stack.pop().unwrap().to_ref().unwrap();
+        let contract_type_ref = self.stack.pop().unwrap().to_ref().unwrap().to_heap_ref().unwrap();
         if contract_type_ref.ty != KindHash::from(KIND_KIND_HASH_STR) {
             panic!("contract type type must be a reference to a kind but got {}", implementor_type_ref.ty);
         }
@@ -569,7 +571,7 @@ impl Evaluator for Interpreter {
                 panic!(message);
             }
 
-            let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap().to_ref().unwrap();
+            let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap().to_ref().unwrap().to_heap_ref().unwrap();
             let implementor_func = self.heap.load(implementor_func_ref.address).to_function().unwrap();
             let req_sig = self.kind_table.load(req_sig_hash).unwrap().to_func_sig().unwrap();
             let implementor_sig = self.kind_table.load(&implementor_func.read().unwrap().to_pel_function().unwrap().read().unwrap().signature).unwrap().to_func_sig().unwrap();
@@ -584,7 +586,7 @@ impl Evaluator for Interpreter {
         }
 
         for (_impl_name, func_val) in implementing_functions_by_name.iter() {
-            let func_ref = func_val.to_ref().unwrap();
+            let func_ref = func_val.to_ref().unwrap().to_heap_ref().unwrap();
             if !required_functions_by_name.contains_value(&func_ref.ty) {
                 let message = format!("Contract implementation for {} by {} contains unknown function: {}",
                                       contract_kind_hash,
@@ -629,22 +631,24 @@ impl Evaluator for Interpreter {
             .get_value_by_name(&func_decl.signature.name)
             .unwrap()
             .to_ref()
+            .unwrap()
+            .to_heap_ref()
             .unwrap();
 
         let func_sig_kind_hash = self.heap.load_type_reference(func_sig_ref.address).unwrap();
         let func_sig = self.kind_table.load(&func_sig_kind_hash).unwrap();
 
-        let func = Function {
+        let func = Function::PelFunction(Arc::new(RwLock::new(PelFunction {
             // TODO -> remove this and pass module context in
             parent: Module::MAIN_MODULE_KIND_HASH,
             signature: func_sig_kind_hash,
             body: func_decl.body.clone(),
             // TODO -> this should be a deep clone i think
             environment: Arc::clone(&self.current_env),
-        };
+        })));
 
         let addr = self.heap.alloc();
-        self.heap.store(addr, Item::Function(Arc::new(RwLock::new(func))));
+        self.heap.store(addr, Item::Function(func));
         let func_val = Value::Reference(Reference {
             // TODO -> need a concept of a function handle which is only based on its inputs and
             // outputs and not the name, context that its in. This is for lambdas, functions as
@@ -698,12 +702,12 @@ impl Evaluator for Interpreter {
         let item = Item::TypeReference(func_sig.kind_hash(&self.kind_table));
         let addr = self.heap.alloc();
         self.heap.store(addr, item);
-        let value = Value::Reference(Reference {
+        let value = Value::Reference(Reference::HeapReference(HeapReference {
             ty: func_sig.kind_hash(&self.kind_table),
             is_self: false,
             address: addr,
             size: std::u32::MAX,
-        });
+        }));
 
         self.kind_table.create(Kind::FunctionSignature(Arc::new(RwLock::new(func_sig))));
         self.current_env.write().unwrap().define(func_sig.name.clone(), value);
@@ -743,7 +747,7 @@ impl Evaluator for Interpreter {
 
     fn visit_variable_assignment(&mut self, var_assignment: &parse_tree::VariableAssignment) {
         self.visit_expression(&var_assignment.target_type);
-        let target_type_reference = self.stack.pop().unwrap().to_ref().unwrap();
+        let target_type_reference = self.stack.pop().unwrap().to_ref().unwrap().to_heap_ref().unwrap();
 
         self.visit_expression(&var_assignment.value);
         let value = self.stack.pop().unwrap();
@@ -840,7 +844,7 @@ impl Evaluator for Interpreter {
 
             let cond_scalar = match cond_value {
                 Value::Scalar(s) => s,
-                Value::Reference(r) => panic!("expected a boolean scalar but got reference of type: {}", r.ty),
+                Value::Reference(r) => panic!("expected a boolean scalar but got reference of type: {}", r.get_ty()),
             };
 
             match cond_scalar.to_bool() {
@@ -896,9 +900,9 @@ impl Evaluator for Interpreter {
     fn visit_field_access(&mut self, field_access: &parse_tree::FieldAccess) {
         let to_access_value = self.stack.pop().unwrap();
         let reference = match to_access_value {
-            Value::Reference(reference) => reference,
+            Value::Reference(Reference::HeapReference(r)) => r,
             Value::Scalar(_) => {
-                let message = format!("trying to use field access syntax on a scalar");
+                let message = format!("trying to use field access syntax on a scalar or stack allocated value");
                 panic!(message);
             }
         };
@@ -955,9 +959,9 @@ impl Evaluator for Interpreter {
     fn visit_module_access(&mut self, mod_access: &parse_tree::ModuleAccess) {
         let to_access_value = self.stack.pop().unwrap();
         let reference = match to_access_value {
-            Value::Reference(reference) => reference,
+            Value::Reference(Reference::HeapReference(r)) => r,
             Value::Scalar(_) => {
-                let message = format!("trying to use field access syntax on a scalar");
+                let message = format!("trying to use field access syntax on a scalar or stack allocated value");
                 panic!(message);
             }
         };
@@ -1023,7 +1027,7 @@ impl Evaluator for Interpreter {
 
     fn visit_object_initialization(&mut self, obj_init: &parse_tree::ObjectInitialization) {
         let value = self.stack.pop().unwrap();
-        let reference = value.to_ref().unwrap();
+        let reference = value.to_ref().unwrap().to_heap_ref().unwrap();
         let item = self.heap.load(reference.address);
         let obj_hash = item.to_type_reference().unwrap();
         let obj = self.kind_table.load(&obj_hash).unwrap().to_object().unwrap();
@@ -1068,12 +1072,12 @@ impl Evaluator for Interpreter {
 
         let address = self.heap.alloc();
         self.heap.store(address, Item::ObjectInstance(Arc::new(RwLock::new(obj_instance))));
-        let reference = Reference {
+        let reference = Reference::HeapReference(HeapReference {
             ty: obj_hash,
             is_self: false,
             address,
             size: std::u32::MAX,
-        };
+        });
         let value = Value::Reference(reference);
         self.stack.push(value);
     }
@@ -1081,9 +1085,9 @@ impl Evaluator for Interpreter {
     fn visit_function_application(&mut self, func_app: &parse_tree::FunctionApplication) {
         let to_apply_to_value = self.stack.pop().unwrap();
         let reference = match to_apply_to_value {
-            Value::Reference(reference) => reference,
+            Value::Reference(Reference::HeapReference(reference)) => reference,
             v => {
-                let message = format!("expected to apply to a reference but got: {:?}", v);
+                let message = format!("expected to apply to a heap reference but got: {:?}", v);
                 panic!(message)
             }
         };
@@ -1116,7 +1120,7 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_type_application(&mut self, type_app: &parse_tree::TypeApplication) {
-        let to_apply_to_ref = self.stack.pop().unwrap().to_ref().unwrap();
+        let to_apply_to_ref = self.stack.pop().unwrap().to_ref().unwrap().to_heap_ref().unwrap();
         let to_apply_to_kind = self.heap.load(to_apply_to_ref.address).to_type_reference().unwrap();
         let to_apply_to = self.kind_table.load(&to_apply_to_kind).unwrap();
 
@@ -1142,7 +1146,7 @@ impl Evaluator for Interpreter {
         let mut types = Vec::new();
         for arg in type_app.args.iter() {
             self.visit_expression(arg);
-            let evaluated_ref = self.stack.pop().unwrap().to_ref().unwrap();
+            let evaluated_ref = self.stack.pop().unwrap().to_ref().unwrap().to_heap_ref().unwrap();
             let evaluated_item = self.heap.load(evaluated_ref.address).to_type_reference().unwrap();
 
             // TODO -> type check that results are of type: Type

@@ -1,5 +1,3 @@
-module abstract;
-
 contract Functor<A> {
   map<B>(func(A) -> B, Self<A>) -> Self<B> 
 }

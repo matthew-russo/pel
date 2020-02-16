@@ -1,5 +1,3 @@
-module Containers;
-
 enum Maybe<T> {
   variants {
     Some(T),

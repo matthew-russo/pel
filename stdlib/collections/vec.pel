@@ -1,5 +1,3 @@
-module Collections;
-
 object Vec<<T>> {
   fields {
     internal: [T],

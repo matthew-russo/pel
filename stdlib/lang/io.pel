@@ -1,9 +1,0 @@
-func print(toPrint: String) {
-  file := File::open("/dev/stdout");
-  file.write(toPrint);
-}
-
-func println(toPrint: String) {
-  file := File::open("/dev/stdout");
-  file.write(toPrint + "\n");
-}

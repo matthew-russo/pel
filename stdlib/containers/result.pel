@@ -1,5 +1,3 @@
-module Containers;
-
 enum Result<L, R> {
   variants {
     Ok(L),

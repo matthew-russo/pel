@@ -443,6 +443,13 @@ impl Heap {
         }
     }
 
+    pub fn load_module_reference(&self, addr: Address) -> Option<KindHash> {
+        match self.load(addr) {
+            Item::ModuleReference(kind_hash) => Some(KindHash::clone(&kind_hash)),
+            _ => None,
+        }
+    }
+
     pub fn load_type_reference(&self, addr: Address) -> Option<KindHash> {
         match self.load(addr) {
             Item::TypeReference(kind_hash) => Some(KindHash::clone(&kind_hash)),
@@ -1010,7 +1017,7 @@ pub(crate) trait Callable<E: Evaluator> {
 // and some of them are actually content
 // there is probably a better abstraction for this
 pub(crate) trait Evaluator {
-    fn visit_program(&mut self, program: &Program);
+    fn visit_program(&mut self, program: &Program, module_chain: &Vec<String>);
     fn visit_declaration(&mut self, declaration: &Declaration);
     fn visit_enum_declaration(&mut self, enum_decl: &EnumDeclaration);
     fn visit_object_declaration(&mut self, obj_decl: &ObjectDeclaration);
@@ -1018,6 +1025,7 @@ pub(crate) trait Evaluator {
     fn visit_implementation_declaration(&mut self, impl_decl: &ImplementationDeclaration);
     fn visit_variant_declaration(&mut self, variant_decl: &VariantDeclaration);
     fn visit_function_declaration(&mut self, function_decl: &FunctionDeclaration);
+    fn visit_use_declaration(&mut self, use_decl: &UseDeclaration);
     fn visit_function_signature(&mut self, function_decl: &crate::syntax::parse_tree::FunctionSignature);
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &TypedVariableDeclaration);
     fn visit_block_body(&mut self, block_body: &BlockBody);

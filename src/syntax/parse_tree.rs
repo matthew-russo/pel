@@ -12,6 +12,7 @@ pub(crate) enum Declaration {
     ImplementationDeclarationNode(ImplementationDeclaration),
     ObjectDeclarationNode(ObjectDeclaration),
     FunctionDeclarationNode(FunctionDeclaration),
+    UseDeclarationNode(UseDeclaration),
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +56,11 @@ pub(crate) struct FunctionDeclaration {
     pub visibility: Option<Visibility>,
     pub signature: FunctionSignature,
     pub body: BlockBody,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UseDeclaration {
+    pub import_chain: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

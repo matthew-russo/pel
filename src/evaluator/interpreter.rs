@@ -83,14 +83,7 @@ impl Interpreter {
         let main_env = Arc::new(RwLock::new(Environment::root()));
         main_env.write().unwrap().overwrite_with(prelude::prelude(&mut kind_table, &mut heap));
 
-        let main_mod = Arc::new(RwLock::new(Module {
-            parent: None,
-            name: "main".into(),
-            env: Arc::clone(&main_env),
-        }));
-        kind_table.create(Kind::Module(main_mod));
-
-        Self {
+        let interpreter = Self {
             kind_table,
             heap,
             vtables: VTables::new(),
@@ -99,7 +92,9 @@ impl Interpreter {
             stack: Vec::new(),
             exiting: false,
             errors: Vec::new(),
-        }
+        };
+
+        interpreter
     }
 
     pub fn emit_error(&mut self, error: String) {
@@ -149,7 +144,7 @@ impl Interpreter {
     }
 
     fn store(&mut self, r: &Reference, v: Value) {
-
+        unimplemented!("call to store in interpreter with r: {:?} and v: {:?}", r, v);
     }
 
     fn resolve_var_name(&mut self, expr: &parse_tree::Expression) -> Option<Reference> {
@@ -206,10 +201,48 @@ impl Interpreter {
             panic!("unable to resolve expression to address: {:?}", expr);
         }
     }
+
+    fn reset_state(&mut self) {
+        self.current_env = Arc::clone(&self.global_env);
+    }
+
+    fn find_or_create_module(&mut self, module_chain: &Vec<String>) {
+        let mut parent_mod = None;
+        for mod_name in module_chain {
+            // TODO try to load module from environment
+            let module = if let Some(val) = self.current_env.read().unwrap().get_value_by_name(mod_name) {
+               match val {
+                    Value::Reference(Reference::HeapReference(hr)) => {
+                        if let Some(m_ref) = self.heap.load_module_reference(hr.address) {
+                            self.kind_table.load(&m_ref).unwrap().to_module().unwrap()
+                            
+                        } else {
+                            panic!("expected a reference to a module but got: {:?}", hr);
+                        }
+                    },
+                    v => panic!("expected a reference to a module but got: {:?}", v),
+               }
+            } else {
+                let module = Arc::new(RwLock::new(Module {
+                    parent: parent_mod,
+                    name: String::clone(mod_name),
+                    env: Arc::new(RwLock::new(Environment::from_parent(&self.current_env))),
+                }));
+                self.kind_table.create(Kind::Module(Arc::clone(&module)));
+                module
+            };
+
+            self.current_env = Arc::clone(&module.read().unwrap().env);
+            parent_mod = Some(module.read().unwrap().kind_hash(&self.kind_table));
+        }
+    }
 }
 
 impl Evaluator for Interpreter {
-    fn visit_program(&mut self, program: &parse_tree::Program) {
+    fn visit_program(&mut self, program: &parse_tree::Program, module_chain: &Vec<String>) {
+        self.reset_state();
+        self.find_or_create_module(module_chain);
+
         for decl in program.declarations.iter() {
             self.visit_declaration(decl);
         }
@@ -233,6 +266,9 @@ impl Evaluator for Interpreter {
 
             FunctionDeclarationNode(func_decl)
                 => self.visit_function_declaration(func_decl),
+
+            UseDeclarationNode(use_decl)
+                => self.visit_use_declaration(use_decl),
         }
     }
 
@@ -626,6 +662,10 @@ impl Evaluator for Interpreter {
 
     fn visit_variant_declaration(&mut self, variant_decl: &parse_tree::VariantDeclaration) {
         panic!("unimplemented visit_variant_declaration");
+    }
+
+    fn visit_use_declaration(&mut self, use_decl: &parse_tree::UseDeclaration) {
+        unimplemented!("use decl");
     }
 
     fn visit_function_declaration(&mut self, func_decl: &parse_tree::FunctionDeclaration) {

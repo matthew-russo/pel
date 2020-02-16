@@ -50,14 +50,20 @@ pub(crate) struct Parser {
 }
 
 impl Parser {
-    pub(crate) fn new(tokens: Vec<Token>) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            tokens: tokens,
+            tokens: Vec::new(),
             current: 0,
         }
     }
 
-    pub(crate) fn parse(&mut self) -> Result<Program, ParseError> {
+    fn reset_state(&mut self, tokens: Vec<Token>) {
+        self.tokens = tokens;
+        self.current = 0;
+    }
+
+    pub(crate) fn parse(&mut self, tokens: Vec<Token>) -> Result<Program, ParseError> {
+        self.reset_state(tokens);
         self.program()
     }
 

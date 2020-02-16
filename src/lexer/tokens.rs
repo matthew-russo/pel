@@ -61,6 +61,7 @@ pub(crate) enum Token {
     Public,
     Return,
     Let,
+    Use,
 
     // literals
     BooleanLit(bool),
@@ -138,6 +139,7 @@ impl Display for Token {
             Public             => "Public".to_string(),
             Return             => "Return".to_string(),
             Let                => "let".to_string(),
+            Use                => "use".to_string(),
 
             // literals
             BooleanLit(b)      => format!("BooleanLit({})", b),
@@ -189,4 +191,5 @@ pub(crate) const RETURN       : &str = "return";
 pub(crate) const LET          : &str = "let";
 pub(crate) const TRUE         : &str = "true";
 pub(crate) const FALSE        : &str = "false";
+pub(crate) const USE          : &str = "use";
 

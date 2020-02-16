@@ -11,6 +11,7 @@ mod utils;
 mod tests;
 
 use std::fs;
+use std::path::Path;
 
 use lexer::lexer::Lexer;
 use parser::parser::Parser;
@@ -33,35 +34,69 @@ fn main() {
 
     let matches = app.get_matches();
     let src_file = matches.value_of(src_file_arg_name).unwrap();
-    let compiler = Compiler::from_file(src_file.into());
-    if let Err(e) = compiler.interpret() {
+    let mut compiler = Compiler::new();
+    if let Err(e) = compiler.interpret_file(src_file, &vec!["main".into()]) {
         panic!("unable to interpret code: {}", e);
     }
 }
 
 struct Compiler {
-    src: String,
+    lexer: Lexer,
+    parser: Parser,
+    interpreter: Interpreter,
 }
 
 impl Compiler {
-    fn from_file(src_file: String) -> Self {
-        let src = fs::read_to_string(src_file).unwrap();
+    fn new() -> Self {
+        let lexer = Lexer::new();
+        let parser = Parser::new();
+        let interpreter = Interpreter::new();
 
-        Self {
-            src
-        }
+        let mut compiler = Self {
+            lexer,
+            parser,
+            interpreter,
+        };
+
+        compiler.load_std_lib();
+
+        compiler
     }
 
-    fn interpret(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let tokens = Lexer::new(self.src.clone()).lex()?;
-        let program = Parser::new(tokens).parse()?;
-        let mut interpreter = Interpreter::new();
-        interpreter.visit_program(&program);
-        interpreter.visit_chainable_expression(&main_func());
+    fn load_std_lib(&mut self) {
+        self.load_dir("stdlib", vec!["pel".into()]);
+    }
+
+    fn load_dir(&mut self, dir: &str, current: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let mut new_current = current.clone();
+                new_current.push(path.file_name().unwrap().to_os_string().into_string().unwrap());
+                self.load_dir(path.as_path().to_str().unwrap(), new_current)?;
+            } else {
+                self.interpret_file(path, &current);
+            }
+        }
+    
         Ok(())
     }
     
-    fn compile(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn interpret_file<P: AsRef<Path>>(&mut self, src_file: P, module_chain: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        let src = fs::read_to_string(src_file)?;
+        self.interpret_code(src, module_chain)
+    }
+
+    fn interpret_code(&mut self, code: String, module_chain: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        let tokens = self.lexer.lex(code)?;
+        let program = self.parser.parse(tokens)?;
+        self.interpreter.visit_program(&program, module_chain);
+        self.interpreter.visit_chainable_expression(&main_func());
+        Ok(())
+    }
+    
+    fn compile(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         panic!("codegen compilation unimplemented");
     }
 }

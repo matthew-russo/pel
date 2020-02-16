@@ -49,9 +49,9 @@ pub(crate) struct Lexer {
 }
 
 impl Lexer {
-    pub(crate) fn new(input: String) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            input: input,
+            input: String::new(),
             start: 0,
             current: 0,
             lexing: Vec::new(),
@@ -59,7 +59,17 @@ impl Lexer {
         }
     }
 
-    pub(crate) fn lex(&mut self) -> Result<Vec<Token>, LexError> {
+    fn reset_state(&mut self, input: String) {
+        self.input = input;
+        self.start = 0;
+        self.current = 0;
+        self.lexing = Vec::new();
+        self.tokens = Vec::new();
+    }
+
+    pub(crate) fn lex(&mut self, input: String) -> Result<Vec<Token>, LexError> {
+        self.reset_state(input);
+
         loop {
             match self._lex() {
                 Ok(Token::EOF) => {
@@ -305,6 +315,7 @@ impl Lexer {
             PUBLIC => Ok(Public),
             RETURN => Ok(Return),
             LET => Ok(Let),
+            USE => Ok(Use),
             _ => {
                 self.start = start;
                 Err(LexError::Message("could not lex keyword".to_string()))

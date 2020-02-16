@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod Objects {
+    use crate::tests::runner::run_code;
+
     #[test]
     fn obj_declaration() {
         let code = r#"
@@ -15,7 +17,7 @@ mod Objects {
             }
         "#;
 
-        runner::run_code(code.into());
+        run_code(code.into());
     }
 
     #[test]
@@ -25,7 +27,7 @@ mod Objects {
 
             }
 
-            object Wrapper<T> {
+            object Wrapper<<T>> {
                 fields {
                     internal: T,
                 }
@@ -37,9 +39,9 @@ mod Objects {
     fn obj_creation() {
         let code = r#"
             func main() {
-              let user := User {
-                first_name: "Matthew",
-                last_name: "Russo",
+              let user: User := User {
+                first_name: "Mason",
+                last_name: "Hitchcock",
               };
             }
             
@@ -51,82 +53,41 @@ mod Objects {
             }
         "#;
 
-        runner::run_code(code.into()); 
+        run_code(code.into()); 
     }
 
     #[test]
     fn obj_creation_generic() {
         let code = r#"
             func main() {
-              let user := Wrapper<String> {
+              let wrapped_str: Wrapper<<String>> := Wrapper<<String>> {
                 internal: "wrapped",
+              };
+
+              let wrapped_int: Wrapper<<int>> := Wrapper<<int>> {
+                internal: 42,
               };
             }
             
-            object Wrapper<T> {
+            object Wrapper<<T>> {
               fields {
                 internal: T,
               }
             }
         "#;
 
-        runner::run_code(code.into()); 
-    }
-
-    #[test]
-    fn obj_field_access() {
-        let code = r#"
-            func main() {
-              let user := User {
-                first_name: "Matthew",
-                last_name: "Russo",
-              };
-
-              assert(user.first_name).is("Matthew");
-              assert(user.last_name).is("Russo");
-            }
-            
-            object User {
-              fields {
-                first_name: String,
-                last_name: String,
-              }
-            }
-        "#;
-
-        runner::run_code(code.into()); 
-    }
-
-    #[test]
-    fn obj_field_access_generic() {
-        let code = r#"
-            func main() {
-              let wrapped := Wrapper<String> {
-                internal: "wrapped",
-              };
-
-              assert(wrapper.internal).is("wrapped");
-            }
-            
-            object Wrapper<T> {
-              fields {
-                wrapped: T,
-              }
-            }
-        "#;
-
-        runner::run_code(code.into()); 
+        run_code(code.into()); 
     }
 
     fn obj_methods() {
         let code = r#"
             func main() {
-              let user := User {
-                first_name: "Matthew",
-                last_name: "Russo",
+              let user: User := User {
+                first_name: "Mason",
+                last_name: "Hitchcock",
               };
 
-              assert(user.full_name).is("Matthew Russo");
+              assert(user.greeting()).is("hello");
             }
             
             object User {
@@ -136,15 +97,41 @@ mod Objects {
               }
             
               methods {
-                public func full_name(self) -> String {
-                    return self.first_name
-                        .concat(" ")
-                        .concat(self.last_name);
+                public func greeting(self) -> String {
+                    return "hello";
                 }
               }
             }
         "#;
 
-        runner::run_code(code.into()); 
+        run_code(code.into()); 
+    }
+
+    fn obj_field_access() {
+        let code = r#"
+            func main() {
+              let user: User := User {
+                first_name: "Mason",
+                last_name: "Hitchcock",
+              };
+
+              assert(user.first_name()).is("Mason Hitchcock");
+            }
+            
+            object User {
+              fields {
+                first_name: String,
+                last_name: String,
+              }
+            
+              methods {
+                public func first_name(self) -> String {
+                    return self.first_name;
+                }
+              }
+            }
+        "#;
+
+        run_code(code.into()); 
     }
 }

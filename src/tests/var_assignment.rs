@@ -1,25 +1,39 @@
 #[cfg(test)]
 mod VarAssignmentTests {
+    use crate::tests::runner::run_code;
+
     #[test]
     fn var_assignment() {
         let code = r#"
             func main() {
-                let x: Integer := 1 + 2;
+                let x: int := 1;
             }
         "#;
 
-        runner::run_code(code.into()); 
+        run_code(code.into()); 
     }
 
     #[test]
     fn var_assignment_assertion() {
         let code = r#"
             func main() {
-                let x: Integer := 1 + 2;
-                assert(x).is(3)
+                let x: int := 1;
+                assert(x).is(3);
             }
         "#;
 
-        runner::run_code(code.into()); 
+        run_code(code.into()); 
+    }
+
+    #[test]
+    fn var_assignment_expression_assertion() {
+        let code = r#"
+            func main() {
+                let x: int := 1 + 2;
+                assert(x).is(3);
+            }
+        "#;
+
+        run_code(code.into()); 
     }
 }

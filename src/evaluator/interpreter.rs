@@ -824,7 +824,6 @@ impl Evaluator for Interpreter {
                 let var_val = match self.current_env.read().unwrap().get_value_by_name(&name) {
                     Some(val) => Value::clone(&val),
                     None => {
-                        println!("ENV: {:?}", self.current_env.read().unwrap());
                         panic!("unknown symbol {:?}", name);
                     }
                 };

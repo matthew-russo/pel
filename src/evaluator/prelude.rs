@@ -51,6 +51,9 @@ pub(super) fn prelude(kind_table: &mut KindTable, heap: &mut Heap) -> HashMap<St
     let print_func_val = Value::create_function(Function::NativeFunction(print_nat_fn()), &kind_table, heap);
     env.insert("print".into(), print_func_val);
 
+    let panic_func_val = Value::create_function(Function::NativeFunction(panic_nat_fn()), &kind_table, heap);
+    env.insert("panic".into(), panic_func_val);
+
     env
 }
 
@@ -72,6 +75,33 @@ fn print_nat_fn() -> Arc<RwLock<NativeFunction>> {
             let maybe_rust_str = pel_utils::pel_string_to_rust_string(&item, &mut interp.heap);
             if let Some(rust_str) = maybe_rust_str {
                 println!("{}", rust_str);
+            } else {
+                println!("expected a string argument but got: {}", arg_heap_ref.ty);
+            }
+
+            None
+        },
+    }))
+}
+
+fn panic_nat_fn() -> Arc<RwLock<NativeFunction>> {
+    Arc::new(RwLock::new(NativeFunction {
+        name: "panic".into(),
+        func: |interp: &mut Interpreter, args: Vec<Value>| {
+            if args.len() != 1 {
+                let message = format!(
+                    "invalid number of parameters function call. expected 1, got {}",
+                    args.len()
+                );
+                panic!(message);
+            }
+
+            let arg_ref = args[0].to_ref().unwrap();
+            let arg_heap_ref = arg_ref.to_heap_ref().unwrap();
+            let item = interp.heap.load(arg_heap_ref.address);
+            let maybe_rust_str = pel_utils::pel_string_to_rust_string(&item, &mut interp.heap);
+            if let Some(rust_str) = maybe_rust_str {
+                panic!("{}", rust_str);
             } else {
                 println!("expected a string argument but got: {}", arg_heap_ref.ty);
             }

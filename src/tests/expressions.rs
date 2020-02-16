@@ -17,7 +17,7 @@ mod Expressions {
     fn simple_int_addition_assertion() {
         let code = r#"
             func main() {
-              assert(1 + 2).is(3)
+              assert(1 + 2).is(3);
             }
         "#;
 

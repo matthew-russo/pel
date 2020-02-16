@@ -7,7 +7,7 @@ mod FunctionTests {
         let code = r#"
             func main() { }
 
-            func add_one_and_two() -> Integer {
+            func add_one_and_two() -> int {
               return 1 + 2;
             }
         "#;
@@ -74,7 +74,7 @@ mod FunctionTests {
               assert(add_one_and_two()).is(3);
             }
             
-            func add_one_and_two() -> Integer {
+            func add_one_and_two() -> int {
               return 1 + 2;
             }
         "#;
@@ -101,11 +101,11 @@ mod FunctionTests {
     fn function_call_generics() {
         let code = r#"
             func main() {
-                assert(id("hello")).is("hello");
-                assert(id(42)).is(42);
+                assert(id<<String>>("hello")).is("hello");
+                assert(id<<int>>(42)).is(42);
             }
 
-            func id<T>(input: T) -> T {
+            func id<<T>>(input: T) -> T {
               return input;
             }
         "#;
@@ -117,8 +117,8 @@ mod FunctionTests {
     fn function_call_multiple_generics() {
         let code = r#"
             func main() {
-              assert(pair_of("hello", 42).is(("hello", 42));
-              assert(pair_of(42, "hello").is((42, "hello"));
+              assert(pair_of<<String, int>>("hello", 42).is(("hello", 42));
+              assert(pair_of<<int, String>>(42, "hello").is((42, "hello"));
             }
             
             func pair_of<<A, B>>(left: A, right: B) -> (A, B) {

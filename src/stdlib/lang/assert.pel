@@ -1,10 +1,10 @@
-func assert<T>(input: T) -> AssertionValue {
+func assert<<T>>(input: T) -> AssertionValue {
   return AssertionValue {
     input: input,
   };
 }
 
-object AssertionValue<T> {
+object AssertionValue<<T>> {
   fields {
     input: T,
   }

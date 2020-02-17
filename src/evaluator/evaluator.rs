@@ -39,33 +39,6 @@ pub(crate) enum Value {
 }
 
 impl Value {
-    pub fn create_type_reference(kind_hash: KindHash, heap: &mut Heap) -> Self {
-        let item = Item::TypeReference(KindHash::clone(&kind_hash));
-        let addr = heap.alloc();
-        heap.store(addr, item);
-        
-        Value::Reference(Reference::HeapReference(HeapReference {
-            ty: KindHash::from(KIND_KIND_HASH_STR),
-            is_self: false,
-            address: addr,
-            size: std::u32::MAX,
-        }))
-    }
-
-    pub fn create_function(function: Function, kind_table: &KindTable, heap: &mut Heap) -> Self {
-        let kind_hash = function.kind_hash(kind_table);
-        let func = Item::Function(function);
-        let addr = heap.alloc();
-        heap.store(addr, func);
-        
-        Value::Reference(Reference::HeapReference(HeapReference {
-            ty: kind_hash,
-            is_self: false,
-            address: addr,
-            size: std::u32::MAX,
-        }))
-    }
-
     pub fn to_ref(&self) -> Option<Reference> {
         match self {
             Value::Reference(r) => Some(Reference::clone(r)),
@@ -82,7 +55,7 @@ impl Value {
 
     pub fn get_ty(&self) -> KindHash {
         match self {
-            Value::Reference(Reference::StackReference(r)) => r.ty.kind_hash(),
+            Value::Reference(Reference::StackReference(r)) => KindHash::clone(&r.ty),
             Value::Reference(Reference::HeapReference(r)) => KindHash::clone(&r.ty),
             Value::Scalar(s) => {
                 match s {
@@ -105,6 +78,33 @@ pub(crate) enum Reference {
 }
 
 impl Reference {
+    pub fn create_type_reference(kind_hash: KindHash, heap: &mut Heap) -> Self {
+        let item = Item::TypeReference(KindHash::clone(&kind_hash));
+        let addr = heap.alloc();
+        heap.store(addr, item);
+        
+        Reference::HeapReference(HeapReference {
+            ty: KindHash::from(KIND_KIND_HASH_STR),
+            is_self: false,
+            address: addr,
+            size: std::u32::MAX,
+        })
+    }
+
+    pub fn create_function(function: Function, kind_table: &KindTable, heap: &mut Heap) -> Self {
+        let kind_hash = function.kind_hash(kind_table);
+        let func = Item::Function(function);
+        let addr = heap.alloc();
+        heap.store(addr, func);
+        
+        Reference::HeapReference(HeapReference {
+            ty: kind_hash,
+            is_self: false,
+            address: addr,
+            size: std::u32::MAX,
+        })
+    }
+
     pub fn to_stack_ref(&self) -> Option<&StackReference> {
         match self {
             Reference::StackReference(r) => Some(r),
@@ -122,7 +122,7 @@ impl Reference {
     pub fn get_ty(&self) -> KindHash {
         match self {
             Reference::StackReference(r) => {
-                r.ty.kind_hash()
+                KindHash::clone(&r.ty)
             },
             Reference::HeapReference(r) => {
                 KindHash::clone(&r.ty)
@@ -133,7 +133,7 @@ impl Reference {
 
 #[derive(Clone, Debug)]
 pub(crate) struct StackReference {
-    pub ty: ScalarType,
+    pub ty: KindHash,
     pub index: usize,
     pub size: u32,
 }
@@ -212,14 +212,25 @@ impl Clone for Item {
 #[derive(Clone, Debug)]
 pub(crate) enum Scalar {
     Boolean(bool),
+    Char(char),
     Integer(i32),
     Long(i64),
     Float(f32),
     Double(f64),
-    Char(char),
 }
 
 impl Scalar {
+    pub fn get_ty(&self) -> KindHash {
+        match self {
+            Scalar::Boolean(_) => ScalarType::bool_kind_hash(),
+            Scalar::Char(_)    => ScalarType::char_kind_hash(),
+            Scalar::Integer(_) => ScalarType::int_kind_hash(),
+            Scalar::Long(_)    => ScalarType::long_kind_hash(),
+            Scalar::Float(_)   => ScalarType::float_kind_hash(),
+            Scalar::Double(_)  => ScalarType::double_kind_hash(),
+        }
+    }
+
     pub fn to_bool(&self) -> Option<bool> {
         match self {
             Scalar::Boolean(b) => Some(*b),
@@ -784,13 +795,13 @@ impl VTables {
 pub(crate) struct VTable {
     pub implementor: KindHash,
     pub implementing: KindHash,
-    pub functions: HashMap<String, Value>,
+    pub functions: HashMap<String, Reference>,
 }
 
 #[derive(Debug)]
 pub(crate) struct Environment {
     pub parent: Option<Arc<RwLock<Environment>>>,
-    locals: HashMap<String, Value>,
+    locals: HashMap<String, Reference>,
 }
 
 impl Environment {
@@ -808,22 +819,22 @@ impl Environment {
         }
     }
 
-    pub fn overwrite_with(&mut self, new_locals: HashMap<String, Value>) {
+    pub fn overwrite_with(&mut self, new_locals: HashMap<String, Reference>) {
         self.locals = new_locals;
     }
 
-    pub fn define(&mut self, name: String, value: Value) {
-        self.locals.insert(name, value);
+    pub fn define(&mut self, name: String, reference: Reference) {
+        self.locals.insert(name, reference);
     }
 
-    pub fn get_value_by_name(&self, name: &String) -> Option<Value> {
+    pub fn get_reference_by_name(&self, name: &String) -> Option<Reference> {
         if self.locals.contains_key(name) {
-            let value = self.locals.get(name).unwrap();
-            return Some(Value::clone(value));
+            let reference = self.locals.get(name).unwrap();
+            return Some(Reference::clone(reference));
         }
 
         match self.parent {
-            Some(ref p) => p.read().unwrap().get_value_by_name(name),
+            Some(ref p) => p.read().unwrap().get_reference_by_name(name),
             None => None
         }
     }
@@ -861,7 +872,7 @@ pub(crate) struct Object {
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
     pub fields: HashMap<String, KindHash>,
-    pub methods: HashMap<String, Value>,
+    pub methods: HashMap<String, Reference>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
 }
 
@@ -879,7 +890,7 @@ pub(crate) struct Enum {
     pub type_arguments: Vec<(String, KindHash)>,
     pub variant_tys: HashMap<String, Option<KindHash>>,
     pub variant_values: HashMap<String, Reference>,
-    pub methods: HashMap<String, Value>,
+    pub methods: HashMap<String, Reference>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
 }
 
@@ -887,7 +898,7 @@ pub(crate) struct Enum {
 pub(crate) struct EnumInstance {
     pub ty: KindHash,
     pub contract_ty: Option<KindHash>,
-    pub variant: (String, Option<Value>),
+    pub variant: (String, Option<Reference>),
 }
 
 #[derive(Clone, Debug)]
@@ -1000,7 +1011,7 @@ pub(crate) struct PelFunction {
 #[derive(Clone)]
 pub(crate) struct NativeFunction {
     pub name: String,
-    pub func: fn(&mut Interpreter, Vec<Value>) -> Option<Value>,
+    pub func: fn(&mut Interpreter, Vec<Reference>) -> Option<Reference>,
 }
 
 impl std::fmt::Debug for NativeFunction {
@@ -1010,7 +1021,7 @@ impl std::fmt::Debug for NativeFunction {
 }
 
 pub(crate) trait Callable<E: Evaluator> {
-    fn call(&self, evaluator: &mut E, args: Vec<Value>) -> Option<Value>;
+    fn call(&self, evaluator: &mut E, args: Vec<Reference>) -> Option<Reference>;
 }
 
 // Some of these are just structural / control flow

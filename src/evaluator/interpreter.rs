@@ -105,17 +105,17 @@ impl Interpreter {
         self.current_env = Arc::new(RwLock::new(env));
     }
 
-    fn get_obj_method_with_name(&self, obj: &Object, name: &String) -> Option<Value> {
-        if let Some(func_hash) = obj.methods.get(name) {
-            return Some(Value::clone(func_hash));
+    fn get_obj_method_with_name(&self, obj: &Object, name: &String) -> Option<Reference> {
+        if let Some(func_ref) = obj.methods.get(name) {
+            return Some(Reference::clone(func_ref));
         }
 
         for (_, vtable_id) in obj.vtables.iter() {
             let vtable = self.vtables.load_vtable(*vtable_id);
             let vtable_readable = vtable.read().unwrap();
 
-            if let Some(func_hash) = vtable_readable.functions.get(name) {
-                return Some(Value::clone(func_hash));
+            if let Some(func_ref) = vtable_readable.functions.get(name) {
+                return Some(Reference::clone(func_ref));
             }
         }
 
@@ -129,25 +129,21 @@ impl Interpreter {
                 let type_hole_name = KindHash::from("___PEL___TYPE_HOLE___");
                 // let addr = self.heap.alloc();
                 // let item = Item::TypeReference(type_hole_name);
-                let value = Value::Reference(Reference::HeapReference(
+                let reference = Reference::HeapReference(
                     HeapReference {
                         ty: KindHash::clone(&type_hole_name),
                         is_self: false,
                         address: std::u32::MAX,
                         size: 0,
                     }
-                ));
-                self.current_env.write().unwrap().define(type_param_name.clone(), value);
+                );
+                self.current_env.write().unwrap().define(type_param_name.clone(), reference);
                 (type_param_name.clone(), type_hole_name)
             })
             .collect()
     }
 
-    fn store(&mut self, r: &Reference, v: Value) {
-        unimplemented!("call to store in interpreter with r: {:?} and v: {:?}", r, v);
-    }
-
-    fn resolve_var_name(&mut self, expr: &parse_tree::Expression) -> Option<Reference> {
+    fn store_in_var_name(&mut self, expr: &parse_tree::Expression, val: Value) -> Option<Reference> {
         let ce = if let parse_tree::Expression::ChainableExpressionNode(ce) = &expr {
             ce
         } else {
@@ -171,35 +167,76 @@ impl Interpreter {
             parse_tree::Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
         };
 
-        if let Some(val) = self.current_env.read().unwrap().get_value_by_name(&var_name) {
-            Some(val.to_ref().unwrap()) 
+        let reference = if let Some(curr_def) = self.current_env.read().unwrap().get_reference_by_name(&var_name) {
+            match &curr_def {
+                Reference::StackReference(sr) => {
+                    self.stack[sr.index] = val;
+                },
+                Reference::HeapReference(hr) => {
+                    let r = val.to_ref().unwrap();
+                    let hr = r.to_heap_ref().unwrap();
+                    let item = self.heap.load(hr.address);
+                    self.heap.store(hr.address, item);
+                },
+                r => unimplemented!("unknown reference type: {:?}", r),
+            }
+
+            curr_def
         } else {
-            // TODO: allocate new address and return
-            None
-        }
+            let reference = match &val {
+                Value::Scalar(s) => {
+                    self.stack.push(Value::clone(&val));
+                    Reference::StackReference(StackReference {
+                        ty: s.get_ty(),
+                        index: self.stack.len() - 1,
+                        size: std::u32::MAX,
+                    })
+                },
+                Value::Reference(Reference::StackReference(sr)) => {
+                    let actual_val = Value::clone(&self.stack[sr.index]);
+                    let ty = actual_val.get_ty();
+                    self.stack.push(actual_val);
+                    Reference::StackReference(StackReference {
+                        ty,
+                        index: self.stack.len() - 1,
+                        size: std::u32::MAX,
+                    })
+                },
+                Value::Reference(Reference::HeapReference(hr)) => {
+                    let address = self.heap.alloc();
+                    let item = self.heap.load(hr.address);
+                    self.heap.store(address, item);
+
+                    Reference::HeapReference(HeapReference {
+                        ty: val.get_ty(),
+                        address,
+                        is_self: false,
+                        size: std::u32::MAX,
+                    })
+                },
+                v => unimplemented!("unrecognized value variant: {:?}", v)
+            };
+
+            self.current_env.write().unwrap().define(var_name, Reference::clone(&reference));
+            reference
+        };
+
+        Some(reference)
     }
 
-    fn resolve_array_access(&mut self, expr: &parse_tree::Expression) -> Option<Reference> {
-        None
+    fn store_in_array(&mut self, expr: &parse_tree::Expression, v: Value) -> Option<Reference> {
+        unimplemented!("store in array -- expr: {:?}, v: {:?}", expr, v);
     }
 
-    // TODO -> LValues? RValues? Is it worth it?
-    // TODO -> make a trait called `Assignable`. Then part of type checking
-    //             will determine whether an Expression is `Assignable`?
-    fn resolve_reference(&mut self, expr: &parse_tree::Expression) -> Reference {
-        // this can be:
-        //      new var val
-        //      preexisting var name
-        //      self name
-        //      array slot
-
-        if let Some(r) = self.resolve_var_name(expr) {
-            r
-        } else if let Some(r) = self.resolve_array_access(expr) {
-            r
-        } else {
-            panic!("unable to resolve expression to address: {:?}", expr);
-        }
+    // this can be:
+    //      new var val
+    //      preexisting var name
+    //      self name
+    //      array slot
+    fn store_at(&mut self, loc_expr: &parse_tree::Expression, v: Value) {
+        self.store_in_var_name(loc_expr, Value::clone(&v))
+            .or_else(|| self.store_in_array(loc_expr, Value::clone(&v)))
+            .or_else(|| panic!("unable to resolve expression to location: {:?}", loc_expr));
     }
 
     fn reset_state(&mut self) {
@@ -210,9 +247,9 @@ impl Interpreter {
         let mut parent_mod = None;
         for mod_name in module_chain {
             // TODO try to load module from environment
-            let module = if let Some(val) = self.current_env.read().unwrap().get_value_by_name(mod_name) {
+            let module = if let Some(val) = self.current_env.read().unwrap().get_reference_by_name(mod_name) {
                match val {
-                    Value::Reference(Reference::HeapReference(hr)) => {
+                    Reference::HeapReference(hr) => {
                         if let Some(m_ref) = self.heap.load_module_reference(hr.address) {
                             self.kind_table.load(&m_ref).unwrap().to_module().unwrap()
                             
@@ -338,19 +375,18 @@ impl Evaluator for Interpreter {
                         size: std::u32::MAX,
                     }))
                 } else {
-                    let enum_constructor = |interp: &mut Interpreter, args: Vec<Value>| {
-                        let enu_kind_hash = interp.heap.load(args[0].to_ref().unwrap().to_heap_ref().unwrap().address).to_type_reference().unwrap();
+                    let enum_constructor = |interp: &mut Interpreter, args: Vec<Reference>| {
+                        let enu_kind_hash = interp.heap.load(args[0].to_heap_ref().unwrap().address).to_type_reference().unwrap();
 
-                        let variant_name_item = interp.heap.load(args[1].to_ref().unwrap().to_heap_ref().unwrap().address);
+                        let variant_name_item = interp.heap.load(args[1].to_heap_ref().unwrap().address);
                         let variant_name = pel_utils::pel_string_to_rust_string(&variant_name_item, &mut interp.heap).unwrap();
 
-                        let does_contain_ty = args[2].to_scalar().unwrap().to_bool().unwrap();
+                        let does_contain_ty = interp.stack[args[2].to_stack_ref().unwrap().index].to_scalar().unwrap().to_bool().unwrap();
 
                         let contains = if does_contain_ty {
-                            let contains_kind_hash = interp.heap.load_type_reference(args[3].to_ref().unwrap().to_heap_ref().unwrap().address).unwrap();
+                            let contains_kind_hash = interp.heap.load_type_reference(args[3].to_heap_ref().unwrap().address).unwrap();
 
-                            let contains_ref = args[4].to_ref().unwrap();
-                            let contains_heap_ref = contains_ref.to_heap_ref().unwrap();
+                            let contains_heap_ref = args[4].to_heap_ref().unwrap();
 
                             if contains_heap_ref.ty != contains_kind_hash {
                                 let message = format!("expected enum variant: {} to contain type {:?}, but got {}",
@@ -360,7 +396,7 @@ impl Evaluator for Interpreter {
                                 panic!(message);
                             }
 
-                            Some(Value::Reference(Reference::HeapReference(HeapReference::clone(contains_heap_ref))))
+                            Some(Reference::HeapReference(HeapReference::clone(contains_heap_ref)))
                         } else {
                             None
                         };
@@ -381,7 +417,7 @@ impl Evaluator for Interpreter {
                             address: addr,
                             size: std::u32::MAX,
                         });
-                        Some(Value::Reference(reference))
+                        Some(reference)
                     };
 
                     let nat_func = Function::NativeFunction(Arc::new(RwLock::new(NativeFunction {
@@ -421,7 +457,7 @@ impl Evaluator for Interpreter {
                 let func_val = self.current_env
                     .read()
                     .unwrap()
-                    .get_value_by_name(&fd.signature.name)
+                    .get_reference_by_name(&fd.signature.name)
                     .unwrap();
                 (fd.signature.name.clone(), func_val)
             })
@@ -435,7 +471,7 @@ impl Evaluator for Interpreter {
         enu.write().unwrap().variant_values = variant_values;
         enu.write().unwrap().methods = methods;
 
-        let reference_to_enum = Value::create_type_reference(enu_kind_hash, &mut self.heap);
+        let reference_to_enum = Reference::create_type_reference(enu_kind_hash, &mut self.heap);
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
         self.current_env = parent_env;
         self.current_env
@@ -475,15 +511,15 @@ impl Evaluator for Interpreter {
         let obj_kind_hash = obj.kind_hash(&self.kind_table);
         self.kind_table.create(Kind::Object(Arc::new(RwLock::new(obj))));
 
-        let reference_to_obj = Value::create_type_reference(KindHash::clone(&obj_kind_hash), &mut self.heap);
+        let reference_to_obj = Reference::create_type_reference(KindHash::clone(&obj_kind_hash), &mut self.heap);
 
         let methods = obj_decl.methods
             .iter()
             .map(|fd| {
-                self.stack.push(Value::clone(&reference_to_obj));
+                self.stack.push(Value::Reference(Reference::clone(&reference_to_obj)));
                 self.visit_function_declaration(fd);
-                let func_val = self.current_env.read().unwrap().get_value_by_name(&fd.signature.name).unwrap();
-                (fd.signature.name.clone(), Value::clone(&func_val))
+                let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fd.signature.name).unwrap();
+                (fd.signature.name.clone(), Reference::clone(&func_ref))
             })
             .collect();
 
@@ -514,12 +550,12 @@ impl Evaluator for Interpreter {
         let contract_kind_hash = contract.kind_hash(&self.kind_table);
         self.kind_table.create(Kind::Contract(Arc::new(RwLock::new(contract))));
 
-        let reference_to_contract = Value::create_type_reference(KindHash::clone(&contract_kind_hash), &mut self.heap);
+        let reference_to_contract = Reference::create_type_reference(KindHash::clone(&contract_kind_hash), &mut self.heap);
 
         let required_functions = contract_decl.functions
                 .iter()
                 .map(|fs| {
-                    self.stack.push(Value::clone(&reference_to_contract));
+                    self.stack.push(Value::Reference(Reference::clone(&reference_to_contract)));
                     self.visit_function_signature(&fs);
                     let reference = self.stack.pop().unwrap().to_ref().unwrap();
                     KindHash::clone(&reference.to_heap_ref().unwrap().ty)
@@ -607,16 +643,16 @@ impl Evaluator for Interpreter {
             panic!(message);
         };
 
-        let implementing_functions_by_name: HashMap<String, Value> = impl_decl.functions
+        let implementing_functions_by_name: HashMap<String, Reference> = impl_decl.functions
             .iter()
             .map(|fd| {
-                self.stack.push(Value::create_type_reference(KindHash::clone(&implementor_kind_hash), &mut self.heap));
+                self.stack.push(Value::Reference(Reference::create_type_reference(KindHash::clone(&implementor_kind_hash), &mut self.heap)));
                 self.visit_function_declaration(fd);
-                let func_val = self.current_env.read().unwrap().get_value_by_name(&fd.signature.name).unwrap();
+                let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fd.signature.name).unwrap();
                
                 // TODO -> need to define in env?
                
-                (fd.signature.name.clone(), Value::clone(&func_val))
+                (fd.signature.name.clone(), Reference::clone(&func_ref))
             })
             .collect();
 
@@ -629,7 +665,7 @@ impl Evaluator for Interpreter {
                 panic!(message);
             }
 
-            let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap().to_ref().unwrap();
+            let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap();
             let implementor_func_heap_ref = implementor_func_ref.to_heap_ref().unwrap();
             let implementor_func = self.heap.load(implementor_func_heap_ref.address).to_function().unwrap();
             let implementor_sig = self.kind_table.load(&implementor_func.to_pel_function().unwrap().read().unwrap().signature).unwrap().to_func_sig().unwrap();
@@ -675,7 +711,7 @@ impl Evaluator for Interpreter {
             self.current_env
                 .read()
                 .unwrap()
-                .get_value_by_name(name)
+                .get_reference_by_name(name)
                 .is_some()
         };
 
@@ -689,9 +725,7 @@ impl Evaluator for Interpreter {
         let func_sig_ref = self.current_env
             .read()
             .unwrap()
-            .get_value_by_name(&func_decl.signature.name)
-            .unwrap()
-            .to_ref()
+            .get_reference_by_name(&func_decl.signature.name)
             .unwrap();
 
         let func_sig_heap_ref = func_sig_ref
@@ -712,7 +746,7 @@ impl Evaluator for Interpreter {
 
         let addr = self.heap.alloc();
         self.heap.store(addr, Item::Function(func));
-        let func_val = Value::Reference(Reference::HeapReference(HeapReference {
+        let func_ref = Reference::HeapReference(HeapReference {
             // TODO -> need a concept of a function handle which is only based on its inputs and
             // outputs and not the name, context that its in. This is for lambdas, functions as
             // values, and checking whether functions satisfy parameter/return constraints
@@ -720,11 +754,11 @@ impl Evaluator for Interpreter {
             is_self: false,
             address: addr,
             size: std::u32::MAX,
-        }));
+        });
         self.current_env
             .write()
             .unwrap()
-            .define(name.clone(), func_val);
+            .define(name.clone(), func_ref);
     }
 
     fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature) {
@@ -765,15 +799,15 @@ impl Evaluator for Interpreter {
         let item = Item::TypeReference(func_sig.kind_hash(&self.kind_table));
         let addr = self.heap.alloc();
         self.heap.store(addr, item);
-        let value = Value::Reference(Reference::HeapReference(HeapReference {
+        let func_sig_ref = Reference::HeapReference(HeapReference {
             ty: func_sig.kind_hash(&self.kind_table),
             is_self: false,
             address: addr,
             size: std::u32::MAX,
-        }));
+        });
 
         self.kind_table.create(Kind::FunctionSignature(Arc::new(RwLock::new(func_sig))));
-        self.current_env.write().unwrap().define(func_sig_syntax.name.clone(), value);
+        self.current_env.write().unwrap().define(func_sig_syntax.name.clone(), func_sig_ref);
     }
 
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &parse_tree::TypedVariableDeclaration) {
@@ -821,14 +855,7 @@ impl Evaluator for Interpreter {
             // track whether this object is acting as a Contract?
         }
 
-        // TODO -> what if this is a scalar?
-        // we can't return an address then
-        // std::mem::replace as a hacky workaround?
-        // well if its a scalar, then its just a value so all we need to do is update the name in
-        // the current_env to point to a new value and there is no heap assignment
-        // maybe return a (Option<String>, Option<Address>)?
-        let reference = self.resolve_reference(&var_assignment.target);
-        self.store(&reference, value);
+        let reference = self.store_at(&var_assignment.target, value);
     }
 
     fn visit_return(&mut self, return_stmt: &parse_tree::Return) {
@@ -861,14 +888,14 @@ impl Evaluator for Interpreter {
                     parse_tree::Variable::SelfType => "Self".to_string(),
                 };
 
-                let var_val = match self.current_env.read().unwrap().get_value_by_name(&name) {
-                    Some(val) => Value::clone(&val),
+                let var_ref = match self.current_env.read().unwrap().get_reference_by_name(&name) {
+                    Some(reference) => Reference::clone(&reference),
                     None => {
                         panic!("unknown symbol {:?}", name);
                     }
                 };
 
-                self.stack.push(var_val);
+                self.stack.push(Value::Reference(var_ref));
             }
             ValueNode(ref value) => {
                 if let parse_tree::Value::StringValue(s) = value {
@@ -1067,8 +1094,8 @@ impl Evaluator for Interpreter {
                                     if does_contain_ty {
                                         // fourth arg should be kind_hash it contains
                                         let variant_kind_hash_value = KindHash::from("unimplemented");
-                                        let type_ref = Value::create_type_reference(variant_kind_hash_value, &mut self.heap);
-                                        self.stack.push(type_ref);
+                                        let type_ref = Reference::create_type_reference(variant_kind_hash_value, &mut self.heap);
+                                        self.stack.push(Value::Reference(type_ref));
 
                                         // fifth arg gets pushed as part of the function application
 
@@ -1179,7 +1206,7 @@ impl Evaluator for Interpreter {
             .iter()
             .map(|expr| {
                 self.visit_expression(expr);
-                self.stack.pop().unwrap()
+                self.stack.pop().unwrap().to_ref().unwrap()
             })
             .collect();
 
@@ -1190,7 +1217,7 @@ impl Evaluator for Interpreter {
         if let Some(sig) = func.signature(&self.kind_table) {
             if let Some(ref _ret) = sig.read().unwrap().returns {
                 // TODO -> type check
-                self.stack.push(result.unwrap())
+                self.stack.push(Value::Reference(result.unwrap()))
             }
         }
     }
@@ -1359,19 +1386,19 @@ impl Evaluator for Interpreter {
 }
 
 impl Callable<Interpreter> for Object {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Enum {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Function {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         match self {
             Function::NativeFunction(nf_arc) => nf_arc.read().unwrap().call(interpreter, args),
             Function::PelFunction(pf_arc)    => pf_arc.read().unwrap().call(interpreter, args),
@@ -1380,7 +1407,7 @@ impl Callable<Interpreter> for Function {
 }
 
 impl Callable<Interpreter> for PelFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         let signature = interpreter.kind_table
             .load(&self.signature)
             .unwrap()
@@ -1398,14 +1425,14 @@ impl Callable<Interpreter> for PelFunction {
         }
 
         let mut func_app_local_env = Environment::from_parent(&self.environment);
-        for ((ref n, ref param_kind), ref arg_value) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
-            if &arg_value.get_ty() != param_kind {
+        for ((ref n, ref param_kind), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
+            if &arg_ref.get_ty() != param_kind {
                 panic!("expected argument with type: {}, got: {}",
                        param_kind,
-                       arg_value.get_ty());
+                       arg_ref.get_ty());
             }
 
-            func_app_local_env.define(n.clone(), Value::clone(arg_value));
+            func_app_local_env.define(n.clone(), Reference::clone(arg_ref));
         }
 
         let current_env = Arc::clone(&interpreter.current_env);
@@ -1416,7 +1443,7 @@ impl Callable<Interpreter> for PelFunction {
         let sig_readable = signature.read().unwrap();
         if let Some(ref _type_sym) = sig_readable.returns {
             // TODO -> type check return based on the expected `type_sym`
-            Some(interpreter.stack.pop().unwrap())
+            Some(interpreter.stack.pop().unwrap().to_ref().unwrap())
         } else {
             None
         }
@@ -1424,7 +1451,7 @@ impl Callable<Interpreter> for PelFunction {
 }
 
 impl Callable<Interpreter> for NativeFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         (self.func)(interpreter, args)
     }
 }

@@ -1,7 +1,11 @@
 use std::collections::HashMap;
+use std::fs;
 use std::ops::{Deref};
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
+use crate::lexer::lexer::Lexer;
+use crate::parser::parser::Parser;
 use crate::syntax::parse_tree;
 use crate::evaluator::pel_utils;
 use crate::evaluator::prelude;
@@ -61,6 +65,9 @@ use crate::evaluator::evaluator::{
 // +------+---------------+---------------+
 
 pub(crate) struct Interpreter {
+    lexer: Lexer,
+    parser: Parser,
+
     pub kind_table: KindTable,
     pub heap: Heap,
     pub vtables: VTables,
@@ -83,7 +90,9 @@ impl Interpreter {
         let main_env = Arc::new(RwLock::new(Environment::root()));
         main_env.write().unwrap().overwrite_with(prelude::prelude(&mut kind_table, &mut heap));
 
-        let interpreter = Self {
+        let mut interpreter = Self {
+            lexer: Lexer::new(),
+            parser: Parser::new(),
             kind_table,
             heap,
             vtables: VTables::new(),
@@ -94,9 +103,45 @@ impl Interpreter {
             errors: Vec::new(),
         };
 
+        interpreter.load_std_lib();
+
         interpreter
     }
 
+    fn load_std_lib(&mut self) {
+        if let Err(e) = self.load_dir("stdlib", vec!["pel".into()]) {
+            println!("failed to load stdlib: {:?}", e);
+        }
+    }
+
+    fn load_dir(&mut self, dir: &str, current: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let mut new_current = current.clone();
+                new_current.push(path.file_name().unwrap().to_os_string().into_string().unwrap());
+                self.load_dir(path.as_path().to_str().unwrap(), new_current)?;
+            } else {
+                self.interpret_file(path, &current)?;
+            }
+        }
+    
+        Ok(())
+    }
+    
+    pub fn interpret_file<P: AsRef<Path>>(&mut self, src_file: P, module_chain: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        let src = fs::read_to_string(src_file)?;
+        self.interpret_code(src, module_chain)
+    }
+
+    pub fn interpret_code(&mut self, code: String, module_chain: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        let tokens = self.lexer.lex(code)?;
+        let program = self.parser.parse(tokens)?;
+        self.visit_program(&program, module_chain);
+        Ok(())
+    }
+    
     pub fn emit_error(&mut self, error: String) {
         self.errors.push(error);
     }
@@ -743,8 +788,9 @@ impl Evaluator for Interpreter {
                 },
                 Some(r) => panic!("expected heap reference to module but got: {:?}", r),
                 None => {
-                    self.load_module(&use_decl.import_chain);
-                    self.visit_use_declaration(&use_decl);
+                    panic!("unknown module: {:?}", mod_name);
+                    // self.load_module(&use_decl.import_chain);
+                    // self.visit_use_declaration(&use_decl);
                 }
             }
         }

@@ -1,8 +1,8 @@
-use crate::Compiler;
+use crate::Interpreter;
 
 pub(crate) fn run_code(code: String) {
-    let mut compiler = Compiler::new();
-    if let Err(e) = compiler.interpret_code(code, &vec!["main".into()]) {
+    let mut interpreter = Interpreter::new();
+    if let Err(e) = interpreter.interpret_code(code, &vec!["main".into()]) {
         panic!("{}", e);
     }
 }

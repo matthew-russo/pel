@@ -333,15 +333,17 @@ impl Interpreter {
         let current_env = Arc::clone(&self.current_env);
         self.current_env = Arc::clone(&self.global_env);
 
-        for mod_name in module_chain {
-
+        let file_tail = module_chain[1..module_chain.len()].join(&format!("{}", std::path::MAIN_SEPARATOR));
+        let file_name = format!("stdlib{}{}.pel", std::path::MAIN_SEPARATOR, file_tail);
+        if let Err(e) = self.interpret_file(file_name, module_chain) {
+            panic!("failed to load stdlib module: {:?}", e);
         }
 
         self.current_env = current_env;
     }
 
     fn load_user_module(&mut self, module_chain: &Vec<String>) {
-
+        unimplemented!("how to load user module");
     }
 }
 
@@ -788,9 +790,8 @@ impl Evaluator for Interpreter {
                 },
                 Some(r) => panic!("expected heap reference to module but got: {:?}", r),
                 None => {
-                    panic!("unknown module: {:?}", mod_name);
-                    // self.load_module(&use_decl.import_chain);
-                    // self.visit_use_declaration(&use_decl);
+                    self.load_module(&use_decl.import_chain);
+                    self.visit_use_declaration(&use_decl);
                 }
             }
         }

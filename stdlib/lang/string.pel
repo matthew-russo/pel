@@ -1,3 +1,5 @@
+use pel::lang::arrays;
+
 object String {
   fields {
     internal: [char],
@@ -5,8 +7,8 @@ object String {
 
   methods {
     func concat(self, other: String) -> String {
-      let new_length: int = self.length() + other.length();
-      let new_chars: [char] = [char; new_length];
+      let new_length: int := self.length() + other.length();
+      let new_chars: [char] := [char; new_length];
       Arrays::copy(self.internal, 0, self.length(), new_chars, 0);
       Arrays::copy(other.internal, 0, other.length(), new_chars, self.length());
 
@@ -28,7 +30,7 @@ object String {
     }
 
     func substring(self, begin: int, end: int) -> String {
-      let new_chars: [char] = Arrays::subsequence(self.internal, begin, end);
+      let new_chars: [char] := Arrays::subsequence(self.internal, begin, end);
       
       return String {
         internal: new_chars,
@@ -36,7 +38,7 @@ object String {
     }
 
     func replace(self, from: char, to: char) -> String {
-      let new_chars: [char] = Arrays::replace(self.internal, from, to);
+      let new_chars: [char] := Arrays::replace(self.internal, from, to);
 
       return String {
         internal: new_chars,
@@ -44,7 +46,7 @@ object String {
     }
 
     func to_lower(self) -> String {
-      let new_chars: [char] = self.internal
+      let new_chars: [char] := self.internal
           .map(c -> Char::to_lower(c))
           .collect();
 
@@ -54,7 +56,7 @@ object String {
     }
 
     func to_upper(self) -> String {
-      let new_chars: [char] = self.internal
+      let new_chars: [char] := self.internal
           .map(c -> Char::to_upper(c))
           .collect();
 

@@ -35,7 +35,7 @@ fn main() {
     let matches = app.get_matches();
     let src_file = matches.value_of(src_file_arg_name).unwrap();
     let mut compiler = Compiler::new();
-    if let Err(e) = compiler.interpret_file(src_file, &vec!["main".into()]) {
+    if let Err(e) = compiler.interpret_file(src_file, &vec!["program".into()]) {
         panic!("unable to interpret code: {}", e);
     }
 }
@@ -64,7 +64,9 @@ impl Compiler {
     }
 
     fn load_std_lib(&mut self) {
-        self.load_dir("stdlib", vec!["pel".into()]);
+        if let Err(e) = self.load_dir("stdlib", vec!["pel".into()]) {
+            println!("failed to load stdlib: {:?}", e);
+        }
     }
 
     fn load_dir(&mut self, dir: &str, current: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -76,7 +78,7 @@ impl Compiler {
                 new_current.push(path.file_name().unwrap().to_os_string().into_string().unwrap());
                 self.load_dir(path.as_path().to_str().unwrap(), new_current)?;
             } else {
-                self.interpret_file(path, &current);
+                self.interpret_file(path, &current)?;
             }
         }
     

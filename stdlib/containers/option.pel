@@ -4,27 +4,12 @@ enum Maybe<T> {
     None
   }
 
-  functions {
-    public of<T>(t: T) -> Self<T> {
-      return Self::Some(t);
-    }
-  }
-
   methods {
     public is_some(self) {
       match self {
         Some(_) => true,
         _ => false,
       }
-    }
-  }
-}
-
-implement Functor<A> for Maybe<A> {
-  map<B>(self, fn: func(A) -> B) -> Maybe<B> {
-    match self {
-      Some(a) => Some(fn(a)),
-      None => None,
     }
   }
 }

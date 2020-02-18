@@ -78,6 +78,19 @@ pub(crate) enum Reference {
 }
 
 impl Reference {
+    pub fn create_module_reference(mod_kind_hash: KindHash, heap: &mut Heap) -> Self {
+        let item = Item::ModuleReference(KindHash::clone(&mod_kind_hash));
+        let addr = heap.alloc();
+        heap.store(addr, item);
+        
+        Reference::HeapReference(HeapReference {
+            ty: KindHash::from(KIND_KIND_HASH_STR), // TODO: Module Kind Hash?
+            is_self: false,
+            address: addr,
+            size: std::u32::MAX,
+        })
+    }
+
     pub fn create_type_reference(kind_hash: KindHash, heap: &mut Heap) -> Self {
         let item = Item::TypeReference(KindHash::clone(&kind_hash));
         let addr = heap.alloc();
@@ -836,6 +849,12 @@ impl Environment {
         match self.parent {
             Some(ref p) => p.read().unwrap().get_reference_by_name(name),
             None => None
+        }
+    }
+
+    pub fn copy_from(&mut self, other: &Environment) {
+        for (name, reference) in other.locals.iter() {
+            self.define(String::clone(name), Reference::clone(reference));
         }
     }
 }

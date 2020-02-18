@@ -1,25 +1,21 @@
 object Vec<<T>> {
   fields {
     internal: [T],
-    len: Int,
-    capacity: Int,
-  }
-
-  functions {
-    
+    len: int,
+    capacity: int,
   }
 
   methods {
-    public len(self) -> Int {
+    public len(self) -> int {
       return self.len;
     }
 
-    public get(self, i: Int) -> T {
+    public get(self, i: int) -> T {
       // TODO -> check bounds or use dep types?
       return internal[i];
     }
 
-    public set(self, i: Int, t: T) -> T {
+    public set(self, i: int, t: T) -> T {
       // TODO -> check bounds or use dep types?
       let temp = self.internal[i];
       self.internals[i] = t;
@@ -42,12 +38,4 @@ object Vec<<T>> {
       self.capacity = self.capacity * 2;
     }
   }
-}
-
-implement Iterator<<T>> for Vec<<T>> {
-
-}
-
-implement Functor<<A> for Vec<<A>> {
-
 }

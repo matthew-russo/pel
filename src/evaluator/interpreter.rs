@@ -269,9 +269,34 @@ impl Interpreter {
                 module
             };
 
+            let mod_kind_hash = module.read().unwrap().kind_hash(&self.kind_table);
+            self.current_env.write().unwrap().define(String::clone(mod_name), Reference::create_module_reference(KindHash::clone(&mod_kind_hash), &mut self.heap));
             self.current_env = Arc::clone(&module.read().unwrap().env);
-            parent_mod = Some(module.read().unwrap().kind_hash(&self.kind_table));
+            parent_mod = Some(mod_kind_hash);
         }
+    }
+
+    fn load_module(&mut self, module_chain: &Vec<String>) {
+        if module_chain[0] == String::from("pel") {
+            self.load_stdlib_module(module_chain);
+        } else {
+            self.load_user_module(module_chain);
+        }
+    }
+
+    fn load_stdlib_module(&mut self, module_chain: &Vec<String>) {
+        let current_env = Arc::clone(&self.current_env);
+        self.current_env = Arc::clone(&self.global_env);
+
+        for mod_name in module_chain {
+
+        }
+
+        self.current_env = current_env;
+    }
+
+    fn load_user_module(&mut self, module_chain: &Vec<String>) {
+
     }
 }
 
@@ -701,7 +726,30 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_use_declaration(&mut self, use_decl: &parse_tree::UseDeclaration) {
-        unimplemented!("use decl");
+        let mut mod_env = Arc::clone(&self.global_env);
+
+        for mod_name in use_decl.import_chain.iter() {
+            match Arc::clone(&mod_env).read().unwrap().get_reference_by_name(mod_name) {
+                Some(Reference::HeapReference(hr)) => {
+                    let item = self.heap.load(hr.address);
+                    match item {
+                        Item::ModuleReference(mr) => {
+                            let module = self.kind_table.load(&mr).unwrap().to_module().unwrap();
+                            let readable_mod = module.read().unwrap();
+                            mod_env = Arc::clone(&readable_mod.env)
+                        },
+                        i => panic!("expected heap reference to module but got: {:?}", i)
+                    }
+                },
+                Some(r) => panic!("expected heap reference to module but got: {:?}", r),
+                None => {
+                    self.load_module(&use_decl.import_chain);
+                    self.visit_use_declaration(&use_decl);
+                }
+            }
+        }
+
+        self.current_env.write().unwrap().copy_from(mod_env.read().unwrap().deref());
     }
 
     fn visit_function_declaration(&mut self, func_decl: &parse_tree::FunctionDeclaration) {

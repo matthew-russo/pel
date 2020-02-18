@@ -4,10 +4,6 @@ enum Result<L, R> {
     Err(R),
   }
 
-  functions {
-
-  }
-
   methods {
     public is_ok(self) -> bool {
       match self {
@@ -25,12 +21,3 @@ enum Result<L, R> {
   }
 }
 
-
-implement Functor<A> for Result<A, E> {
-  map<B>(self, fn: func(A) -> B) -> Result<B, E> {
-    match self {
-      Ok(a) => Ok(fn(a)),
-      Err(e) => Err(e),
-    }
-  }
-}

@@ -2,7 +2,7 @@
 mod VarAssignmentTests {
     use crate::tests::runner::run_code;
 
-    #[test]
+    // #[test]
     fn var_assignment() {
         let code = r#"
             func main() {
@@ -13,7 +13,7 @@ mod VarAssignmentTests {
         run_code(code.into()); 
     }
 
-    #[test]
+    // #[test]
     fn var_assignment_assertion() {
         let code = r#"
             func main() {
@@ -25,7 +25,7 @@ mod VarAssignmentTests {
         run_code(code.into()); 
     }
 
-    #[test]
+    // #[test]
     fn var_assignment_expression_assertion() {
         let code = r#"
             func main() {

@@ -1,13 +1,9 @@
+use pel::lang::string;
+
 object File {
   fields {
-    fd: Int,
+    fd: int,
     absolute_path: String,
-  }
-
-  functions {
-    func open(path: String) -> Self {
-
-    }
   }
 
   methods {

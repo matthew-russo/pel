@@ -70,6 +70,8 @@ mod FunctionTests {
     #[test]
     fn function_call_no_args() {
         let code = r#"
+            use pel::lang::assert;
+
             func main() {
               assert(add_one_and_two()).is(3);
             }
@@ -85,6 +87,8 @@ mod FunctionTests {
     #[test]
     fn function_call_args() {
         let code = r#"
+            use pel::lang::assert;
+
             func main() {
               assert(add(1, 2)).is(3);
             }
@@ -100,6 +104,8 @@ mod FunctionTests {
     #[test]
     fn function_call_generics() {
         let code = r#"
+            use pel::lang::assert;
+
             func main() {
                 assert(id<<String>>("hello")).is("hello");
                 assert(id<<int>>(42)).is(42);
@@ -116,6 +122,8 @@ mod FunctionTests {
     #[test]
     fn function_call_multiple_generics() {
         let code = r#"
+            use pel::lang::assert;
+
             func main() {
               assert(pair_of<<String, int>>("hello", 42).is(("hello", 42));
               assert(pair_of<<int, String>>(42, "hello").is((42, "hello"));

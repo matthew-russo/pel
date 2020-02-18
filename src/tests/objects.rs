@@ -5,6 +5,8 @@ mod Objects {
     #[test]
     fn obj_declaration() {
         let code = r#"
+            use pel::lang::string;
+
             func main() {
              
             }
@@ -33,11 +35,15 @@ mod Objects {
                 }
             }
         "#;
+
+        run_code(code.into());
     }
 
     #[test]
     fn obj_creation() {
         let code = r#"
+            use pel::lang::string;
+
             func main() {
               let user: User := User {
                 first_name: "Mason",
@@ -59,6 +65,8 @@ mod Objects {
     #[test]
     fn obj_creation_generic() {
         let code = r#"
+            use pel::lang::string;
+
             func main() {
               let wrapped_str: Wrapper<<String>> := Wrapper<<String>> {
                 internal: "wrapped",
@@ -79,8 +87,11 @@ mod Objects {
         run_code(code.into()); 
     }
 
+    #[test]
     fn obj_methods() {
         let code = r#"
+            use pel::lang::string;
+
             func main() {
               let user: User := User {
                 first_name: "Mason",
@@ -107,8 +118,11 @@ mod Objects {
         run_code(code.into()); 
     }
 
+    #[test]
     fn obj_field_access() {
         let code = r#"
+            use pel::lang::string;
+
             func main() {
               let user: User := User {
                 first_name: "Mason",

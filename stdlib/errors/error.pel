@@ -1,3 +1,5 @@
+use pel::lang::string;
+
 contract Error {
   error() -> String;
 }

@@ -134,6 +134,10 @@ impl Parser {
                 let func_decl = self.function_declaration()?;
                 Ok(Declaration::FunctionDeclarationNode(func_decl))
             },
+            Token::Use => {
+                let use_decl = self.use_declaration()?;
+                Ok(Declaration::UseDeclarationNode(use_decl))
+            },
             t => {
                 let message = format!("Unable to parse any type of declaration at token: {}, pos: {}", t, self.current);
                 Err(ParseError::Message(message))
@@ -350,6 +354,31 @@ impl Parser {
             visibility,
             signature,
             body,
+        })
+    }
+
+    fn use_declaration(&mut self) -> Result<UseDeclaration, ParseError> {
+        self.expect(Token::Use, "use_declaration")?;
+      
+        let name_token = self.expect(IDENTIFIER, "use_declaration")?;
+        let name = Self::extract_identifier(&name_token).unwrap();
+        let mut import_chain = vec![name];
+
+        loop {
+            match self.expect(Token::DoubleColon, "use_declaration") {
+                Ok(_) => {
+                    let name_token = self.expect(IDENTIFIER, "use_declaration")?;
+                    let name = Self::extract_identifier(&name_token).unwrap();
+                    import_chain.push(name);
+                },
+                Err(_) => break
+            }
+        }
+
+        self.expect(Token::Semicolon, "use_declaration")?;
+
+        Ok(UseDeclaration {
+            import_chain,
         })
     }
 

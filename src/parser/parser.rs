@@ -718,6 +718,15 @@ impl Parser {
                         break;
                     }
                 },
+                Token::OpenSquareBracket => {
+                    let current = self.current;
+                    if let Ok(arr_access) = self.array_access() {
+                        chained.push(ExpressionChain::ArrayAccessNode(arr_access));
+                    } else {
+                        self.current = current;
+                        break;
+                    }
+                },
                 Token::OpenCurlyBracket => {
                     let current = self.current;
                     if let Ok(obj_init) = self.object_initialization() {
@@ -877,6 +886,14 @@ impl Parser {
                 let loop_expr = self.loop_expr()?;
                 Ok(ExpressionStart::LoopNode(loop_expr))
             },
+            // TODO -> there is another case that isn't covered which is array initialization
+            // right now this is defined as `[<ty>; <length]`
+            // given the difficulty of parsing this, it might be better to come up with a different
+            // syntax for this
+            Token::OpenSquareBracket => {
+                let arr_ty = self.array_type_expr()?;
+                Ok(ExpressionStart::ArrayType(arr_ty))
+            },
             Token::SelfVariable => {
                 self.expect(Token::SelfVariable, "expression_start")?;
                 Ok(ExpressionStart::VariableNode(Variable::SelfVariable))
@@ -931,6 +948,16 @@ impl Parser {
         let id = Self::extract_identifier(&id_token).unwrap();
         Ok(ModuleAccess {
             name: id,
+        })
+    }
+
+    fn array_access(&mut self) -> Result<ArrayAccess, ParseError> {
+        self.expect(Token::OpenSquareBracket, "array_access")?;
+        let index_expr = self.expression()?;
+        self.expect(Token::CloseSquareBracket, "array_access")?;
+
+        Ok(ArrayAccess {
+            index_expr,
         })
     }
 
@@ -1115,6 +1142,16 @@ impl Parser {
             condition,
             step,
             body,
+        })
+    }
+
+    fn array_type_expr(&mut self) -> Result<ArrayType, ParseError> {
+        self.expect(Token::OpenSquareBracket, "array_type_expr")?;
+        let containing = self.expression()?;
+        self.expect(Token::CloseSquareBracket, "array_type_expr")?;
+
+        Ok(ArrayType {
+            containing,
         })
     }
 

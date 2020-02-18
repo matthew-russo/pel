@@ -1000,6 +1000,9 @@ impl Evaluator for Interpreter {
                     let val = Value::Scalar(Scalar::from(value));
                     self.stack.push(val);
                 }
+            },
+            ArrayType(ref arr_ty) => {
+                unimplemented!("array types");
             }
         };
 
@@ -1011,6 +1014,9 @@ impl Evaluator for Interpreter {
 
                 ModuleAccessNode(mod_access)
                     => self.visit_module_access(mod_access),
+
+                ArrayAccessNode(arr_access)
+                    => self.visit_array_access(arr_access),
 
                 ObjectInitializationNode(obj_init)
                     => self.visit_object_initialization(obj_init),
@@ -1217,6 +1223,10 @@ impl Evaluator for Interpreter {
             },
             _ => panic!("trying to use module access syntax on something that isn't a module: {:?}", item),
         }
+    }
+
+    fn visit_array_access(&mut self, arr_acces: &parse_tree::ArrayAccess) {
+        unimplemented!("visit array access");
     }
 
     fn visit_object_initialization(&mut self, obj_init: &parse_tree::ObjectInitialization) {

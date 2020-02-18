@@ -1069,6 +1069,7 @@ pub(crate) trait Evaluator {
     fn visit_loop(&mut self, loop_node: &Loop) ;
     fn visit_field_access(&mut self, field_access: &FieldAccess) ;
     fn visit_module_access(&mut self, mod_access: &ModuleAccess) ;
+    fn visit_array_access(&mut self, mod_access: &ArrayAccess) ;
     fn visit_object_initialization(&mut self, obj_init_node: &ObjectInitialization) ;
     fn visit_function_application(&mut self, func_app_node: &FunctionApplication) ;
     fn visit_type_application(&mut self, type_app_node: &TypeApplication) ;

@@ -145,12 +145,14 @@ pub(crate) enum ExpressionStart {
     LoopNode(Loop),
     VariableNode(Variable),
     ValueNode(Value),
+    ArrayType(ArrayType),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum ExpressionChain {
     FieldAccessNode(FieldAccess),
     ModuleAccessNode(ModuleAccess),
+    ArrayAccessNode(ArrayAccess),
     ObjectInitializationNode(ObjectInitialization),
     FunctionApplicationNode(FunctionApplication),
     TypeApplicationNode(TypeApplication),
@@ -180,6 +182,11 @@ pub(crate) struct ModuleAccess {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct ArrayAccess {
+    pub index_expr: Expression,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct TypeApplication {
     pub args: Vec<Expression>,
 }
@@ -203,6 +210,11 @@ pub(crate) enum Value {
     CharValue(char),
     IntegerValue(i32),
     FloatValue(f32),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ArrayType {
+    pub containing: Expression,
 }
 
 #[derive(Debug, Clone)]

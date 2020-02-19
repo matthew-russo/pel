@@ -48,8 +48,9 @@ object String {
     func to_lower(self) -> String {
       let new_chars: [char] := self
           .internal
-          .map(c -> Char::to_lower(c))
-          .collect();
+          .map(|c| {
+            return Char::to_lower(c);
+          });
 
       return String {
         internal: new_chars,
@@ -58,8 +59,9 @@ object String {
 
     func to_upper(self) -> String {
       let new_chars: [char] := self.internal
-          .map(c -> Char::to_upper(c))
-          .collect();
+          .map(|c| {
+            return Char::to_upper(c);
+          });
 
       return String {
         internal: new_chars,

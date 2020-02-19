@@ -891,8 +891,16 @@ impl Parser {
             // given the difficulty of parsing this, it might be better to come up with a different
             // syntax for this
             Token::OpenSquareBracket => {
-                let arr_ty = self.array_type_expr()?;
-                Ok(ExpressionStart::ArrayType(arr_ty))
+                let current = self.current;
+
+                if let Ok(arr_ty) = self.array_type_expr() {
+                    return Ok(ExpressionStart::ArrayType(arr_ty))
+                } else {
+                    self.current = current;
+                }
+
+                let arr_init = self.array_init_expr()?;
+                Ok(ExpressionStart::ArrayInitialization(arr_init))
             },
             Token::SelfVariable => {
                 self.expect(Token::SelfVariable, "expression_start")?;
@@ -1147,11 +1155,24 @@ impl Parser {
 
     fn array_type_expr(&mut self) -> Result<ArrayType, ParseError> {
         self.expect(Token::OpenSquareBracket, "array_type_expr")?;
-        let containing = self.expression()?;
+        let ty = self.expression()?;
         self.expect(Token::CloseSquareBracket, "array_type_expr")?;
 
         Ok(ArrayType {
-            containing,
+            ty,
+        })
+    }
+
+    fn array_init_expr(&mut self) -> Result<ArrayInitialization, ParseError> {
+        self.expect(Token::OpenSquareBracket, "array_init_expr")?;
+        let ty = self.expression()?;
+        self.expect(Token::Semicolon, "array_init_expr")?;
+        let size = self.expression()?;
+        self.expect(Token::CloseSquareBracket, "array_init_expr")?;
+
+        Ok(ArrayInitialization {
+            ty,
+            size,
         })
     }
 

@@ -42,11 +42,12 @@ object String {
 
       return String {
         internal: new_chars,
-      }
+      };
     }
 
     func to_lower(self) -> String {
-      let new_chars: [char] := self.internal
+      let new_chars: [char] := self
+          .internal
           .map(c -> Char::to_lower(c))
           .collect();
 

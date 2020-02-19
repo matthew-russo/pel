@@ -146,6 +146,7 @@ pub(crate) enum ExpressionStart {
     VariableNode(Variable),
     ValueNode(Value),
     ArrayType(ArrayType),
+    ArrayInitialization(ArrayInitialization),
 }
 
 #[derive(Debug, Clone)]
@@ -214,7 +215,14 @@ pub(crate) enum Value {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ArrayType {
-    pub containing: Expression,
+    pub ty: Expression,
+}
+
+
+#[derive(Debug, Clone)]
+pub(crate) struct ArrayInitialization {
+    pub ty: Expression,
+    pub size: Expression,
 }
 
 #[derive(Debug, Clone)]

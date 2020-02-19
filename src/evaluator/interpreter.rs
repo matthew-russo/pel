@@ -1002,7 +1002,10 @@ impl Evaluator for Interpreter {
                 }
             },
             ArrayType(ref arr_ty) => {
-                unimplemented!("array types");
+                unimplemented!("array type");
+            },
+            ArrayInitialization(ref arr_init) => {
+                unimplemented!("array initialization");
             }
         };
 

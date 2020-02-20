@@ -434,30 +434,10 @@ impl Parser {
 
         let returns = match self.current_token() {
             Token::Arrow => {
-                self.expect(Token::Arrow, "function_signature").unwrap();
-                // TODO -> figure out how to parse this
-
-                match self.current_token() {
-                    Token::SelfType => {
-                        self.expect(Token::SelfType, "function_signature")?;
-                        let chainable_expr = Box::new(ChainableExpression {
-                            start: ExpressionStart::VariableNode(Variable::SelfType),
-                            chained: Vec::new(),
-                        });
-                        Some(Expression::ChainableExpressionNode(chainable_expr))
-                    },
-                    Token::Identifier(id) => {
-                        self.expect(IDENTIFIER, "function_signature")?;
-                        let chainable_expr = Box::new(ChainableExpression {
-                            start: ExpressionStart::VariableNode(Variable::Name(id)),
-                            chained: Vec::new(),
-                        });
-                        Some(Expression::ChainableExpressionNode(chainable_expr))
-                    },
-                    _ => {
-                        None
-                    }
-                }
+                self.expect(Token::Arrow, "function_signature")?;
+                let expr = self.expression()?;
+                self.expect(Token::Semicolon, "function_signature")?;
+                Some(expr)
             },
             _ => None
         };

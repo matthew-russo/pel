@@ -103,12 +103,12 @@ impl Interpreter {
             errors: Vec::new(),
         };
 
-        interpreter.load_std_lib();
+        interpreter.load_stdlib();
 
         interpreter
     }
 
-    fn load_std_lib(&mut self) {
+    fn load_stdlib(&mut self) {
         if let Err(e) = self.load_dir("stdlib", vec!["pel".into()]) {
             println!("failed to load stdlib: {:?}", e);
         }
@@ -291,31 +291,33 @@ impl Interpreter {
     fn find_or_create_module(&mut self, module_chain: &Vec<String>) {
         let mut parent_mod = None;
         for mod_name in module_chain {
-            // TODO try to load module from environment
-            let module = if let Some(val) = self.current_env.read().unwrap().get_reference_by_name(mod_name) {
-               match val {
-                    Reference::HeapReference(hr) => {
-                        if let Some(m_ref) = self.heap.load_module_reference(hr.address) {
-                            self.kind_table.load(&m_ref).unwrap().to_module().unwrap()
-                            
-                        } else {
-                            panic!("expected a reference to a module but got: {:?}", hr);
-                        }
-                    },
-                    v => panic!("expected a reference to a module but got: {:?}", v),
-               }
-            } else {
-                let module = Arc::new(RwLock::new(Module {
-                    parent: parent_mod,
-                    name: String::clone(mod_name),
-                    env: Arc::new(RwLock::new(Environment::from_parent(&self.current_env))),
-                }));
-                self.kind_table.create(Kind::Module(Arc::clone(&module)));
-                module
+            let module = {
+                if let Some(val) = self.current_env.write().unwrap().get_reference_by_name(mod_name) {
+                   match val {
+                        Reference::HeapReference(hr) => {
+                            if let Some(m_ref) = self.heap.load_module_reference(hr.address) {
+                                self.kind_table.load(&m_ref).unwrap().to_module().unwrap()
+                                
+                            } else {
+                                panic!("expected a reference to a module but got: {:?}", hr);
+                            }
+                        },
+                        v => panic!("expected a reference to a module but got: {:?}", v),
+                   }
+                } else {
+                    let module = Arc::new(RwLock::new(Module {
+                        parent: parent_mod,
+                        name: String::clone(mod_name),
+                        env: Arc::new(RwLock::new(Environment::from_parent(&self.current_env))),
+                    }));
+                    self.kind_table.create(Kind::Module(Arc::clone(&module)));
+                    module
+                }
             };
 
             let mod_kind_hash = module.read().unwrap().kind_hash(&self.kind_table);
-            self.current_env.write().unwrap().define(String::clone(mod_name), Reference::create_module_reference(KindHash::clone(&mod_kind_hash), &mut self.heap));
+            let mod_ref = Reference::create_module_reference(KindHash::clone(&mod_kind_hash), &mut self.heap);
+            self.current_env.write().unwrap().define(String::clone(mod_name), mod_ref);
             self.current_env = Arc::clone(&module.read().unwrap().env);
             parent_mod = Some(mod_kind_hash);
         }
@@ -336,7 +338,7 @@ impl Interpreter {
         let file_tail = module_chain[1..module_chain.len()].join(&format!("{}", std::path::MAIN_SEPARATOR));
         let file_name = format!("stdlib{}{}.pel", std::path::MAIN_SEPARATOR, file_tail);
         if let Err(e) = self.interpret_file(file_name, module_chain) {
-            panic!("failed to load stdlib module: {:?}", e);
+            panic!("failed to load stdlib module: {:?}, with error: {:?}", module_chain, e);
         }
 
         self.current_env = current_env;
@@ -776,7 +778,8 @@ impl Evaluator for Interpreter {
         let mut mod_env = Arc::clone(&self.global_env);
 
         for mod_name in use_decl.import_chain.iter() {
-            match Arc::clone(&mod_env).read().unwrap().get_reference_by_name(mod_name) {
+            let ref_to_match = mod_env.read().unwrap().get_reference_by_name(mod_name);
+            match ref_to_match {
                 Some(Reference::HeapReference(hr)) => {
                     let item = self.heap.load(hr.address);
                     match item {

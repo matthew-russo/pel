@@ -161,7 +161,7 @@ pub(crate) struct HeapReference {
 
 #[derive(Debug)]
 pub(crate) enum Item {
-    Array(Arc<RwLock<Array>>),
+    ArrayInstance(Arc<RwLock<ArrayInstance>>),
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
     Function(Function),
@@ -211,7 +211,7 @@ impl Clone for Item {
         use Item::*;
 
         match self {
-            Array(ref arr_arc)           => Array(Arc::clone(arr_arc)),
+            ArrayInstance(ref arr_arc)   => ArrayInstance(Arc::clone(arr_arc)),
             ObjectInstance(ref oi_arc)   => ObjectInstance(Arc::clone(oi_arc)),
             EnumInstance(ref ei_arc)     => EnumInstance(Arc::clone(ei_arc)),
             Function(ref func)           => Function(func.clone()),
@@ -446,9 +446,9 @@ impl Heap {
         self.items.insert(addr, item);
     }
 
-    pub fn load_array(&self, addr: Address) -> Option<Arc<RwLock<Array>>> {
+    pub fn load_array_instance(&self, addr: Address) -> Option<Arc<RwLock<ArrayInstance>>> {
         match self.load(addr) {
-            Item::Array(ref array_arc) => Some(Arc::clone(array_arc)),
+            Item::ArrayInstance(ref array_arc) => Some(Arc::clone(array_arc)),
             _ => None,
         }
     }
@@ -484,6 +484,7 @@ impl Heap {
 
 #[derive(Debug)]
 pub(crate) enum Kind {
+    Array(Arc<RwLock<Array>>),
     Object(Arc<RwLock<Object>>),
     Enum(Arc<RwLock<Enum>>),
     Contract(Arc<RwLock<Contract>>),
@@ -576,6 +577,7 @@ impl Kind {
 impl Clone for Kind {
     fn clone(&self) -> Self {
         match self {
+            Kind::Array(arr_arc)  => Kind::Array(Arc::clone(arr_arc)),
             Kind::Object(o_arc)   => Kind::Object(Arc::clone(o_arc)),
             Kind::Enum(e_arc)     => Kind::Enum(Arc::clone(e_arc)),
             Kind::Contract(c_arc) => Kind::Contract(Arc::clone(c_arc)),
@@ -861,6 +863,18 @@ impl Environment {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Array {
+    pub ty: KindHash,
+}
+
+impl KindHashable for Array {
+    fn kind_hash(&self, table: &KindTable) -> KindHash {
+        let ty = table.load(&self.ty).unwrap();
+        KindHash::from(format!("[{}]", ty.kind_hash(table)))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ArrayInstance {
     pub ty: KindHash,
     pub length: u32,
     pub values: Vec<Value>,

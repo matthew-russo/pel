@@ -11,6 +11,8 @@ use crate::evaluator::pel_utils;
 use crate::evaluator::prelude;
 use crate::evaluator::evaluator::{
     Address,
+    Array,
+    ArrayInstance,
     Callable,
     Contract,
     Enum,
@@ -864,14 +866,14 @@ impl Evaluator for Interpreter {
 
         let mut parameters = Vec::new();
         for param in func_sig_syntax.parameters.iter() {
-            let param_ty = self.stack.pop().unwrap().get_ty();
             let p = match param {
                 parse_tree::FunctionParameter::SelfParam => {
-                    // TODO -> might want to pop this regardless or else our stack will always grow
+                    let param_ty = self.stack.pop().unwrap().get_ty();
                     (SELF_VAR_SYMBOL_NAME.into(), param_ty)
                 },
                 parse_tree::FunctionParameter::TypedVariableDeclarationParam(tvd) => {
                     self.visit_expression(&tvd.type_reference);
+                    let param_ty = self.stack.pop().unwrap().get_ty();
                     (tvd.name.clone(), param_ty)
                 }
             };
@@ -1005,7 +1007,14 @@ impl Evaluator for Interpreter {
                 }
             },
             ArrayType(ref arr_ty) => {
-                unimplemented!("array type");
+                self.visit_expression(&arr_ty.ty);
+                let arr = Arc::new(RwLock::new(Array {
+                    ty: self.stack.pop().unwrap().get_ty(),
+                }));
+                self.kind_table.create(Kind::Array(Arc::clone(&arr)));
+                let arr_kind_hash = arr.read().unwrap().kind_hash(&self.kind_table);
+                let arr_ref = Reference::create_type_reference(arr_kind_hash, &mut self.heap);
+                self.stack.push(Value::Reference(arr_ref));
             },
             ArrayInitialization(ref arr_init) => {
                 unimplemented!("array initialization");

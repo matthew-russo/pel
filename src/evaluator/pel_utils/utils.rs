@@ -1,7 +1,7 @@
 use std::collections::{HashMap};
 use std::sync::{Arc, RwLock};
 
-use crate::evaluator::evaluator::{Array, Heap, HeapReference, KindHash, Item, ObjectInstance, Reference, Scalar, Value};
+use crate::evaluator::evaluator::{ArrayInstance, Heap, HeapReference, KindHash, Item, ObjectInstance, Reference, Scalar, Value};
 use crate::evaluator::prelude::{CHAR_TY, STRING_TY, STRING_FIELD};
 
 pub(crate) fn rust_string_to_pel_string(input: &String, heap: &mut Heap) -> Reference {
@@ -15,14 +15,14 @@ fn alloc_array(chars: Vec<char>, heap: &mut Heap) -> Reference {
         .map(|c| Value::Scalar(Scalar::Char(*c)))
         .collect();
 
-    let array = Array {
+    let array = ArrayInstance {
         ty: CHAR_TY.into(),
         length: chars.len() as u32,
         values: char_vals,
     };
 
     let addr = heap.alloc();
-    heap.store(addr, Item::Array(Arc::new(RwLock::new(array))));
+    heap.store(addr, Item::ArrayInstance(Arc::new(RwLock::new(array))));
 
     Reference::HeapReference(HeapReference {
         ty: format!("[{}]", CHAR_TY), // TODO -> don't hard code this?
@@ -67,7 +67,7 @@ fn to_string_object_of_type(item: &Item, ty: KindHash) -> Option<Arc<RwLock<Obje
     Some(obj)
 }
 
-fn get_char_array_of_pel_string(pel_string: Arc<RwLock<ObjectInstance>>, heap: &mut Heap) -> Option<Arc<RwLock<Array>>> {
+fn get_char_array_of_pel_string(pel_string: Arc<RwLock<ObjectInstance>>, heap: &mut Heap) -> Option<Arc<RwLock<ArrayInstance>>> {
     let arr_ref = pel_string
         .read()
         .unwrap()
@@ -81,10 +81,10 @@ fn get_char_array_of_pel_string(pel_string: Arc<RwLock<ObjectInstance>>, heap: &
         .to_heap_ref()
         .unwrap();
 
-    heap.load_array(arr_heap_ref.address)
+    heap.load_array_instance(arr_heap_ref.address)
 }
 
-fn pel_char_array_to_rust_string(arr: Arc<RwLock<Array>>) -> Option<String> {
+fn pel_char_array_to_rust_string(arr: Arc<RwLock<ArrayInstance>>) -> Option<String> {
     // TODO -> type check?
     Some(arr
          .read()

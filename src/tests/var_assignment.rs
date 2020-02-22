@@ -16,9 +16,11 @@ mod VarAssignmentTests {
     // #[test]
     fn var_assignment_assertion() {
         let code = r#"
+            use pel::lang::assert;
+
             func main() {
                 let x: int := 1;
-                assert(x).is(3);
+                assert<<int>>(x).is(3);
             }
         "#;
 
@@ -28,9 +30,11 @@ mod VarAssignmentTests {
     // #[test]
     fn var_assignment_expression_assertion() {
         let code = r#"
+            use pel::lang::assert;
+
             func main() {
                 let x: int := 1 + 2;
-                assert(x).is(3);
+                assert<<int>>(x).is(3);
             }
         "#;
 

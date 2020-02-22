@@ -75,6 +75,7 @@ pub(crate) struct Interpreter {
     pub vtables: VTables,
     global_env: Arc<RwLock<Environment>>,
     current_env: Arc<RwLock<Environment>>,
+    current_module: KindHash,
     pub stack: Vec<Value>,
     exiting: bool,
     errors: Vec<String>,
@@ -100,6 +101,7 @@ impl Interpreter {
             vtables: VTables::new(),
             global_env: Arc::clone(&main_env),
             current_env: main_env,
+            current_module: KindHash::from(""),
             stack: Vec::new(),
             exiting: false,
             errors: Vec::new(),
@@ -291,8 +293,10 @@ impl Interpreter {
         self.current_env = Arc::clone(&self.global_env);
     }
 
-    fn find_or_create_module(&mut self, module_chain: &Vec<String>) {
+    fn find_or_create_module(&mut self, module_chain: &Vec<String>) -> KindHash{
         let mut parent_mod = None;
+        let mut last_kind_hash = String::new();
+
         for mod_name in module_chain {
             let module = {
                 if let Some(val) = self.current_env.write().unwrap().get_reference_by_name(mod_name) {
@@ -322,8 +326,12 @@ impl Interpreter {
             let mod_ref = Reference::create_module_reference(KindHash::clone(&mod_kind_hash), &mut self.heap);
             self.current_env.write().unwrap().define(String::clone(mod_name), mod_ref);
             self.current_env = Arc::clone(&module.read().unwrap().env);
-            parent_mod = Some(mod_kind_hash);
+            parent_mod = Some(KindHash::clone(&mod_kind_hash));
+
+            last_kind_hash = mod_kind_hash;
         }
+
+        last_kind_hash
     }
 
     fn load_module(&mut self, module_chain: &Vec<String>) {
@@ -355,7 +363,7 @@ impl Interpreter {
 impl Evaluator for Interpreter {
     fn visit_program(&mut self, program: &parse_tree::Program, module_chain: &Vec<String>) {
         self.reset_state();
-        self.find_or_create_module(module_chain);
+        self.current_module = self.find_or_create_module(module_chain);
 
         for decl in program.declarations.iter() {
             self.visit_declaration(decl);
@@ -391,7 +399,7 @@ impl Evaluator for Interpreter {
         self.current_env = Arc::new(RwLock::new(local_env));
 
         let mut enu = Enum {
-            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            parent: KindHash::clone(&self.current_module),
             name: String::clone(&enum_decl.type_name),
             type_arguments: Vec::new(),
             variant_tys: HashMap::new(),
@@ -565,7 +573,7 @@ impl Evaluator for Interpreter {
         self.current_env = Arc::new(RwLock::new(local_env));
 
         let mut obj = Object {
-            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            parent: KindHash::clone(&self.current_module),
             name: obj_decl.type_name.clone(),
             type_arguments: Vec::new(),
             fields: HashMap::new(),
@@ -620,7 +628,7 @@ impl Evaluator for Interpreter {
         self.current_env = Arc::new(RwLock::new(local_env));
 
         let mut contract = Contract {
-            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            parent: KindHash::clone(&self.current_module),
             name: contract_decl.type_name.clone(),
             type_arguments: Vec::new(),
             required_functions: Vec::new(),
@@ -828,8 +836,10 @@ impl Evaluator for Interpreter {
         let func_sig = self.kind_table.load(&func_sig_kind_hash).unwrap();
 
         let func = Function::PelFunction(Arc::new(RwLock::new(PelFunction {
-            // TODO -> remove this and pass module context in
-            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            // TODO -> this should be aware of whether its in a module or an object/enum/contract
+            // TODO -> this would be changing what calls this function to set the current module,
+            // not this method explicitly
+            parent: KindHash::clone(&self.current_module),
             signature: KindHash::clone(&func_sig_kind_hash),
             body: func_decl.body.clone(),
             // TODO -> this should be a deep clone i think
@@ -855,7 +865,7 @@ impl Evaluator for Interpreter {
 
     fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature) {
         let mut func_sig = FunctionSignature {
-            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            parent: KindHash::clone(&self.current_module),
             name: func_sig_syntax.name.clone(),
             type_parameters: Vec::new(),
             parameters: Vec::new(),
@@ -874,7 +884,9 @@ impl Evaluator for Interpreter {
                 },
                 parse_tree::FunctionParameter::TypedVariableDeclarationParam(tvd) => {
                     self.visit_expression(&tvd.type_reference);
-                    let param_ty = self.stack.pop().unwrap().get_ty();
+                    let param_ty_ref = self.stack.pop().unwrap().to_ref().unwrap();
+                    let param_ty_heap_ref = param_ty_ref.to_heap_ref().unwrap();
+                    let param_ty = self.heap.load(param_ty_heap_ref.address).to_type_reference().unwrap();
                     (tvd.name.clone(), param_ty)
                 }
             };
@@ -997,8 +1009,15 @@ impl Evaluator for Interpreter {
                     let str_ref = pel_utils::rust_string_to_pel_string(s, &mut self.heap);
                     self.stack.push(Value::Reference(str_ref));
                 } else {
-                    let val = Value::Scalar(Scalar::from(value));
-                    self.stack.push(val);
+                    let scalar = Scalar::from(value);
+                    let scalar_ty = scalar.get_ty();
+                    self.stack.push(Value::Scalar(scalar));
+                    let stack_ref = Reference::StackReference(StackReference {
+                        ty: scalar_ty,
+                        index: self.stack.len() - 1,
+                        size: std::u32::MAX,
+                    });
+                    self.stack.push(Value::Reference(stack_ref));
                 }
             },
             ArrayType(ref arr_ty) => {
@@ -1321,7 +1340,8 @@ impl Evaluator for Interpreter {
             .iter()
             .map(|expr| {
                 self.visit_expression(expr);
-                self.stack.pop().unwrap().to_ref().unwrap()
+                let top_of_stack = self.stack.pop().unwrap();
+                top_of_stack.to_ref().unwrap()
             })
             .collect();
 
@@ -1340,6 +1360,13 @@ impl Evaluator for Interpreter {
     fn visit_type_application(&mut self, type_app: &parse_tree::TypeApplication) {
         let to_apply_to_ref = self.stack.pop().unwrap().to_ref().unwrap();
         let to_apply_to_heap_ref = to_apply_to_ref.to_heap_ref().unwrap();
+        println!("type_app: {:?}", to_apply_to_ref);
+        println!("to_apply_to_ref: {:?}", to_apply_to_ref);
+        println!("to_apply_to_kind: {:?}", self.heap.load(to_apply_to_heap_ref.address));
+
+        // TODO -> to_apply_to_kind is a function, which isn't a kind. we need to pass through the
+        // signature??
+
         let to_apply_to_kind = self.heap.load(to_apply_to_heap_ref.address).to_type_reference().unwrap();
         let to_apply_to = self.kind_table.load(&to_apply_to_kind).unwrap();
 
@@ -1462,41 +1489,40 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_binary_operation(&mut self, bin_op: &parse_tree::BinaryOperation) {
-        let lhs_value = self.stack.pop().unwrap();
-        let lhs = match lhs_value {
-            Value::Scalar(scalar) => scalar,
-            other => panic!(format!(
-                "expected lhs of binary operation to be a scalar but was {:?}",
-                other
-            )),
-        };
-
+        let top_of_stack = self.stack.pop().unwrap();
+        let lhs_ref = top_of_stack.to_ref().expect(&format!("expected lhs of binary operation to be a stack reference but was {:?}", top_of_stack));
+        let lhs_stack_ref = lhs_ref.to_stack_ref().expect(&format!("expected lhs of binary operation to be a stack reference but was {:?}", lhs_ref));
+        let lhs = self.stack[lhs_stack_ref.index].to_scalar().expect(&format!("expected stack reference to point to scalar but was: {:?}", self.stack[lhs_stack_ref.index]));
+        
         self.visit_expression(&bin_op.rhs);
-        let rhs_value = self.stack.pop().unwrap();
-        let rhs = match rhs_value {
-            Value::Scalar(scalar) => scalar,
-            other => panic!(format!(
-                "expected rhs of binary operation to be a scalar but was {:?}",
-                other
-            )), 
-        };
+        let top_of_stack = self.stack.pop().unwrap();
+        let rhs_ref = top_of_stack.to_ref().expect(&format!("expected rhs of binary operation to be a stack reference but was {:?}", top_of_stack));
+        let rhs_stack_ref = rhs_ref.to_stack_ref().expect(&format!("expected rhs of binary operation to be a stack reference but was {:?}", rhs_ref));
+        let rhs = self.stack[rhs_stack_ref.index].to_scalar().expect(&format!("expected stack reference to point to scalar but was: {:?}", self.stack[rhs_stack_ref.index]));
 
         let result = match &bin_op.op {
-            parse_tree::BinaryOperator::Plus =>               Value::Scalar(Scalar::add(lhs, rhs)),
-            parse_tree::BinaryOperator::Minus =>              Value::Scalar(Scalar::subtract(lhs, rhs)),
-            parse_tree::BinaryOperator::Multiply =>           Value::Scalar(Scalar::multiply(lhs, rhs)),
-            parse_tree::BinaryOperator::Divide =>             Value::Scalar(Scalar::divide(lhs, rhs)),
-            parse_tree::BinaryOperator::LessThan =>           Value::Scalar(Scalar::less_than(lhs, rhs)),
-            parse_tree::BinaryOperator::LessThanOrEqual =>    Value::Scalar(Scalar::less_than_or_equal(lhs, rhs)),
-            parse_tree::BinaryOperator::GreaterThan =>        Value::Scalar(Scalar::greater_than(lhs, rhs)),
-            parse_tree::BinaryOperator::GreaterThanOrEqual => Value::Scalar(Scalar::greater_than_or_equal(lhs, rhs)),
-            parse_tree::BinaryOperator::Equal =>              Value::Scalar(Scalar::equal_to(lhs, rhs)),
-            parse_tree::BinaryOperator::NotEqual =>           Value::Scalar(Scalar::not_equal_to(lhs, rhs)),
-            parse_tree::BinaryOperator::Or =>                 Value::Scalar(Scalar::or(lhs, rhs)),
-            parse_tree::BinaryOperator::And =>                Value::Scalar(Scalar::and(lhs, rhs)),
+            parse_tree::BinaryOperator::Plus =>               Scalar::add(lhs, rhs),
+            parse_tree::BinaryOperator::Minus =>              Scalar::subtract(lhs, rhs),
+            parse_tree::BinaryOperator::Multiply =>           Scalar::multiply(lhs, rhs),
+            parse_tree::BinaryOperator::Divide =>             Scalar::divide(lhs, rhs),
+            parse_tree::BinaryOperator::LessThan =>           Scalar::less_than(lhs, rhs),
+            parse_tree::BinaryOperator::LessThanOrEqual =>    Scalar::less_than_or_equal(lhs, rhs),
+            parse_tree::BinaryOperator::GreaterThan =>        Scalar::greater_than(lhs, rhs),
+            parse_tree::BinaryOperator::GreaterThanOrEqual => Scalar::greater_than_or_equal(lhs, rhs),
+            parse_tree::BinaryOperator::Equal =>              Scalar::equal_to(lhs, rhs),
+            parse_tree::BinaryOperator::NotEqual =>           Scalar::not_equal_to(lhs, rhs),
+            parse_tree::BinaryOperator::Or =>                 Scalar::or(lhs, rhs),
+            parse_tree::BinaryOperator::And =>                Scalar::and(lhs, rhs),
         };
 
-        self.stack.push(result);
+        let scalar_ty = result.get_ty();
+        self.stack.push(Value::Scalar(result));
+        let stack_ref = Reference::StackReference(StackReference {
+            ty: scalar_ty,
+            index: self.stack.len() - 1,
+            size: std::u32::MAX,
+        });
+        self.stack.push(Value::Reference(stack_ref));
     }
 }
 

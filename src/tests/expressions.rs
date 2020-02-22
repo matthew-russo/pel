@@ -16,8 +16,10 @@ mod Expressions {
     #[test]
     fn simple_int_addition_assertion() {
         let code = r#"
+            use pel::lang::assert;
+
             func main() {
-              assert(1 + 2).is(3);
+              assert<<int>>(1 + 2).is(3);
             }
         "#;
 

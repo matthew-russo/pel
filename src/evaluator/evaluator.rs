@@ -662,68 +662,65 @@ impl KindHashable for Kind {
 
 impl KindHashable for Object {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let to_append = if !self.type_arguments.is_empty() {
+        let base = [KindHash::clone(&self.parent), self.name.clone()].join("::");
+
+        if !self.type_arguments.is_empty() {
             let type_arg_kind_hash = self.type_arguments
                 .iter()
                 .map(|(_, kh)| KindHash::clone(kh))
                 .collect::<Vec<String>>()
                 .join(",");
    
-            ["<<".into(), type_arg_kind_hash, ">>".into()].join("")
+            format!("{}<<{}>>", base, type_arg_kind_hash)
         } else {
-            String::new()
-        };
-        
-        [KindHash::clone(&self.parent), self.name.clone(), to_append].join("::")
-
+            base
+        }
     }
 }
 
 impl KindHashable for Enum {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let to_append = if !self.type_arguments.is_empty() {
+        let base = [KindHash::clone(&self.parent), self.name.clone()].join("::");
+
+        if !self.type_arguments.is_empty() {
             let type_arg_kind_hash = self.type_arguments
                 .iter()
                 .map(|(_, kh)| KindHash::clone(kh))
                 .collect::<Vec<String>>()
                 .join(",");
    
-            ["<<".into(), type_arg_kind_hash, ">>".into()].join("")
+            format!("{}<<{}>>", base, type_arg_kind_hash)
         } else {
-            String::new()
-        };
-        
-        [KindHash::clone(&self.parent), self.name.clone(), to_append].join("::")
+            base
+        }
     }
 }
 
 impl KindHashable for Contract {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let to_append = if !self.type_arguments.is_empty() {
+        let base = [KindHash::clone(&self.parent), self.name.clone()].join("::");
+
+        if !self.type_arguments.is_empty() {
             let type_arg_kind_hash = self.type_arguments
                 .iter()
                 .map(|(_, kh)| KindHash::clone(kh))
                 .collect::<Vec<KindHash>>()
                 .join(",");
    
-            ["<<".into(), type_arg_kind_hash, ">>".into()].join("")
+            format!("{}<<{}>>", base, type_arg_kind_hash)
         } else {
-            String::new()
-        };
-        
-        [KindHash::clone(&self.parent), self.name.clone(), to_append].join("::")
+            base
+        }
     }
 }
 
 impl KindHashable for Module {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        let hash = if let Some(ref p) = self.parent {
-            KindHash::clone(p)
+        if let Some(ref p) = self.parent {
+            [KindHash::clone(p), String::clone(&self.name)].join("::")
         } else {
-            String::new()
-        };
-
-        [hash, self.name.clone()].join("::")
+            String::clone(&self.name)
+        }
     }
 }
 

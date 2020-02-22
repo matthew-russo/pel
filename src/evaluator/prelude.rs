@@ -26,7 +26,7 @@ pub const LONG_TY:   &str = "long";
 pub const FLOAT_TY:  &str = "float";
 pub const DOUBLE_TY: &str = "double";
 
-pub const STRING_TY: &str = "pel::lang::String";
+pub const STRING_TY: &str = "pel::lang::string::String";
 pub const STRING_FIELD: &str = "internal";
 
 pub(super) fn prelude(kind_table: &mut KindTable, heap: &mut Heap) -> HashMap<String, Reference> {

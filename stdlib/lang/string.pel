@@ -6,18 +6,18 @@ object String {
   }
 
   methods {
-    func concat(self, other: String) -> String; {
+    func concat(self, other: Self) -> Self; {
       let new_length: int := self.length() + other.length();
       let new_chars: [char] := [char; new_length];
       Arrays::copy(self.internal, 0, self.length(), new_chars, 0);
       Arrays::copy(other.internal, 0, other.length(), new_chars, self.length());
 
-      return String {
+      return Self {
         internal: new_chars,
       };
     }
 
-    func contains(self, other: String) -> bool; {
+    func contains(self, other: Self) -> bool; {
       return Arrays::contains_sequence(self.internal, other.internal);
     }
 
@@ -29,41 +29,41 @@ object String {
       return Arrays::length(self.internal);
     }
 
-    func substring(self, begin: int, end: int) -> String; {
+    func substring(self, begin: int, end: int) -> Self; {
       let new_chars: [char] := Arrays::subsequence(self.internal, begin, end);
       
-      return String {
+      return Self {
         internal: new_chars,
       };
     }
 
-    func replace(self, from: char, to: char) -> String; {
+    func replace(self, from: char, to: char) -> Self; {
       let new_chars: [char] := Arrays::replace(self.internal, from, to);
 
-      return String {
+      return Self {
         internal: new_chars,
       };
     }
 
-    func to_lower(self) -> String; {
+    func to_lower(self) -> Self; {
       let new_chars: [char] := self
           .internal
           .map(|c| {
             return Char::to_lower(c);
           });
 
-      return String {
+      return Self {
         internal: new_chars,
       };
     }
 
-    func to_upper(self) -> String; {
+    func to_upper(self) -> Self; {
       let new_chars: [char] := self.internal
           .map(|c| {
             return Char::to_upper(c);
           });
 
-      return String {
+      return Self {
         internal: new_chars,
       };
     }

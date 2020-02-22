@@ -105,13 +105,13 @@ impl Reference {
     }
 
     pub fn create_function(function: Function, kind_table: &KindTable, heap: &mut Heap) -> Self {
-        let kind_hash = function.kind_hash(kind_table);
+        let func_ty = function.signature();
         let func = Item::Function(function);
         let addr = heap.alloc();
         heap.store(addr, func);
         
         Reference::HeapReference(HeapReference {
-            ty: kind_hash,
+            ty: func_ty,
             is_self: false,
             address: addr,
             size: std::u32::MAX,
@@ -647,6 +647,7 @@ pub(crate) trait KindHashable {
 impl KindHashable for Kind {
     fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
         match self {
+            Kind::Array(a)    => a.read().unwrap().kind_hash(kind_table),
             Kind::Object(o)   => o.read().unwrap().kind_hash(kind_table),
             Kind::Enum(e)     => e.read().unwrap().kind_hash(kind_table),
             Kind::Contract(c) => c.read().unwrap().kind_hash(kind_table),
@@ -726,27 +727,6 @@ impl KindHashable for Module {
     }
 }
 
-impl KindHashable for Function {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        match self {
-            Function::NativeFunction(nf) => nf.read().unwrap().kind_hash(kind_table),
-            Function::PelFunction(pf) => pf.read().unwrap().kind_hash(kind_table),
-        }
-    }
-}
-
-impl KindHashable for NativeFunction {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        KindHash::from(format!("<NativeFunction-{}>", self.name))
-    }
-}
-
-impl KindHashable for PelFunction {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
-        [KindHash::clone(&self.parent), KindHash::clone(&self.signature)].join("::")
-    }
-}
-
 pub(crate) struct KindTable {
     kinds: HashMap<KindHash, Kind>,
 }
@@ -813,7 +793,6 @@ pub(crate) struct VTable {
     pub functions: HashMap<String, Reference>,
 }
 
-#[derive(Debug)]
 pub(crate) struct Environment {
     pub parent: Option<Arc<RwLock<Environment>>>,
     locals: HashMap<String, Reference>,
@@ -859,6 +838,32 @@ impl Environment {
             self.define(String::clone(name), Reference::clone(reference));
         }
     }
+
+    fn locals(&self, indent_level: usize) -> String {
+        self.locals
+            .iter()
+            .map(|(name, reference)| {
+                format!("{}{}: {:?}", "\t".repeat(indent_level), name, reference)
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    fn print(&self, indent_level: usize) -> String {
+        if let Some(ref env) = self.parent {
+            let locals = format!("{}Locals:\n{}", "\t".repeat(indent_level), self.locals(indent_level));
+            let parent = format!("{}Parent:\n{}", "\t".repeat(indent_level), env.read().unwrap().print(indent_level + 1));
+            format!("{}\n\n{}", locals, parent)
+        } else {
+            self.locals(indent_level)
+        }
+    }
+}
+
+impl std::fmt::Debug for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.print(1))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -868,8 +873,7 @@ pub(crate) struct Array {
 
 impl KindHashable for Array {
     fn kind_hash(&self, table: &KindTable) -> KindHash {
-        let ty = table.load(&self.ty).unwrap();
-        KindHash::from(format!("[{}]", ty.kind_hash(table)))
+        KindHash::from(format!("[{}]", self.ty))
     }
 }
 
@@ -936,6 +940,7 @@ pub(crate) struct EnumInstance {
 
 #[derive(Clone, Debug)]
 pub(crate) struct FunctionSignature {
+    pub parent: KindHash,
     pub name: String,
     pub type_parameters: Vec<(String, KindHash)>,
     pub parameters: Vec<(String, KindHash)>,
@@ -974,33 +979,35 @@ impl FunctionSignature {
 
 impl KindHashable for FunctionSignature {
     fn kind_hash(&self, table: &KindTable) -> String {
-        let type_params = if !self.type_parameters.is_empty() {
-            let tp_str = self.type_parameters
-                .iter()
-                .map(|(n, kh)| KindHash::clone(kh))
-                .collect::<Vec<KindHash>>()
-                .join(", ");
-            format!("<{}>", tp_str)
-        } else {
-            String::new()
-        };
+        [KindHash::clone(&self.parent), self.name.clone()].join("::")
 
-        let params = if !self.parameters.is_empty() {
-            self.parameters
-                .iter()
-                .map(|(n, kh)| KindHash::clone(kh))
-                .collect::<Vec<KindHash>>()
-                .join(", ")
-        } else {
-            String::new()
-        };
+        // let type_params = if !self.type_parameters.is_empty() {
+        //     let tp_str = self.type_parameters
+        //         .iter()
+        //         .map(|(n, kh)| KindHash::clone(kh))
+        //         .collect::<Vec<KindHash>>()
+        //         .join(", ");
+        //     format!("<{}>", tp_str)
+        // } else {
+        //     String::new()
+        // };
 
-        let returns = match self.returns {
-            Some(ref kh) => format!(" -> {}", kh),
-            None => String::new(),
-        };
-        
-        format!("func{} {}({}){}", type_params, self.name, params, returns)
+        // let params = if !self.parameters.is_empty() {
+        //     self.parameters
+        //         .iter()
+        //         .map(|(n, kh)| KindHash::clone(kh))
+        //         .collect::<Vec<KindHash>>()
+        //         .join(", ")
+        // } else {
+        //     String::new()
+        // };
+
+        // let returns = match self.returns {
+        //     Some(ref kh) => format!(" -> {}", kh),
+        //     None => String::new(),
+        // };
+        // 
+        // format!("func{} {}({}){}", type_params, self.name, params, returns)
     }
 }
 
@@ -1025,10 +1032,11 @@ impl Function {
         }
     }
 
-    pub fn signature(&self, kind_table: &KindTable) -> Option<Arc<RwLock<FunctionSignature>>> {
+    pub fn signature(&self) -> KindHash {
         match self {
-            Function::PelFunction(pf) => kind_table.load(&pf.read().unwrap().signature).unwrap().to_func_sig(),
-            _ => None,
+            Function::PelFunction(pf) => KindHash::clone(&pf.read().unwrap().signature),
+            Function::NativeFunction(nf) => KindHash::clone(&nf.read().unwrap().signature),
+            _ => unimplemented!("unknown function type: {:?}", self),
         }
     }
 }
@@ -1044,6 +1052,7 @@ pub(crate) struct PelFunction {
 #[derive(Clone)]
 pub(crate) struct NativeFunction {
     pub name: String,
+    pub signature: KindHash,
     pub func: fn(&mut Interpreter, Vec<Reference>) -> Option<Reference>,
 }
 

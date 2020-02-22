@@ -120,12 +120,12 @@ impl Interpreter {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
+            let mut new_current = current.clone();
+            new_current.push(path.file_stem().unwrap().to_os_string().into_string().unwrap());
             if path.is_dir() {
-                let mut new_current = current.clone();
-                new_current.push(path.file_name().unwrap().to_os_string().into_string().unwrap());
                 self.load_dir(path.as_path().to_str().unwrap(), new_current)?;
             } else {
-                self.interpret_file(path, &current)?;
+                self.interpret_file(path, &new_current)?;
             }
         }
     
@@ -169,23 +169,23 @@ impl Interpreter {
         None
     }
 
-    fn generate_type_holes(&mut self, type_params: &Vec<String>) -> Vec<(String, KindHash)> {
+    fn generate_type_holes(&mut self, context: &KindHash, type_params: &Vec<String>) -> Vec<(String, KindHash)> {
         type_params
             .iter()
             .map(|type_param_name| {
-                let type_hole_name = KindHash::from("___PEL___TYPE_HOLE___");
-                // let addr = self.heap.alloc();
-                // let item = Item::TypeReference(type_hole_name);
+                let type_hole = KindHash::from(format!("{}::TypeVariabe{{{}}}", context, type_param_name));
+                let addr = self.heap.alloc();
+                let item = Item::TypeReference(KindHash::clone(&type_hole));
                 let reference = Reference::HeapReference(
                     HeapReference {
-                        ty: KindHash::clone(&type_hole_name),
+                        ty: KindHash::clone(&type_hole),
                         is_self: false,
                         address: std::u32::MAX,
                         size: 0,
                     }
                 );
                 self.current_env.write().unwrap().define(type_param_name.clone(), reference);
-                (type_param_name.clone(), type_hole_name)
+                (type_param_name.clone(), type_hole)
             })
             .collect()
     }
@@ -389,9 +389,21 @@ impl Evaluator for Interpreter {
         let mut local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
-        let type_arguments = self.generate_type_holes(&enum_decl.type_params);
+        let mut enu = Enum {
+            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            name: String::clone(&enum_decl.type_name),
+            type_arguments: Vec::new(),
+            variant_tys: HashMap::new(),
+            variant_values: HashMap::new(),
+            methods: HashMap::new(),
+            vtables: HashMap::new(),
+        };
 
-        let variant_tys = enum_decl.variants
+        let enu_kind_hash = enu.kind_hash(&self.kind_table);
+       
+        enu.type_arguments = self.generate_type_holes(&enu_kind_hash, &enum_decl.type_params);
+        
+        enu.variant_tys = enum_decl.variants
             .iter()
             .map(|vd| {
                 let contains = if let Some(expr) = &vd.contains {
@@ -417,20 +429,8 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let mut enu = Enum {
-            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
-            name: enum_decl.type_name.clone(),
-            type_arguments,
-            variant_tys,
-            variant_values: HashMap::new(),
-            methods: HashMap::new(),
-            vtables: HashMap::new(),
-        };
 
-        let enu_kind_hash = enu.kind_hash(&self.kind_table);
-        self.kind_table.create(Kind::Enum(Arc::new(RwLock::new(enu))));
-
-        let variant_values = enum_decl.variants
+        enu.variant_values = enum_decl.variants
             .iter()
             .map(|vd| {
                 if vd.contains.is_none() {
@@ -444,8 +444,8 @@ impl Evaluator for Interpreter {
                     let addr = self.heap.alloc();
                     self.heap.store(addr, item);
 
-                    (vd.name.clone(), Reference::HeapReference(HeapReference {
-                        ty: KindHash::from(KIND_KIND_HASH_STR),
+                    (String::clone(&vd.name), Reference::HeapReference(HeapReference {
+                        ty: KindHash::clone(&enu_kind_hash),
                         is_self: false,
                         address: addr,
                         size: std::u32::MAX,
@@ -496,12 +496,20 @@ impl Evaluator for Interpreter {
                         Some(reference)
                     };
 
+                    // TODO -> need to get the signature of this?
+                    let nat_func_sig = FunctionSignature {
+                        parent: KindHash::clone(&enu_kind_hash),
+                        name: String::clone(&vd.name),
+                        type_parameters: Vec::new(),
+                        parameters: vec![/*(String, KindHash*/],
+                        returns: Some(KindHash::clone(&enu_kind_hash)),
+                    };
+                    let nat_func_ty = nat_func_sig.kind_hash(&self.kind_table);
                     let nat_func = Function::NativeFunction(Arc::new(RwLock::new(NativeFunction {
                         name: "".into(),
+                        signature: KindHash::clone(&nat_func_ty),
                         func: enum_constructor,
                     })));
-
-                    let nat_func_ty = nat_func.kind_hash(&self.kind_table);
 
                     let addr = self.heap.alloc();
                     self.heap.store(addr, Item::Function(nat_func));
@@ -516,7 +524,7 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let methods = enum_decl
+        enu.methods = enum_decl
             .methods
             .iter()
             .map(|fd| {
@@ -539,13 +547,7 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        let enu = self.kind_table
-            .load(&enu_kind_hash)
-            .unwrap()
-            .to_enum()
-            .unwrap();
-        enu.write().unwrap().variant_values = variant_values;
-        enu.write().unwrap().methods = methods;
+        self.kind_table.create(Kind::Enum(Arc::new(RwLock::new(enu))));
 
         let reference_to_enum = Reference::create_type_reference(enu_kind_hash, &mut self.heap);
         let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
@@ -560,9 +562,19 @@ impl Evaluator for Interpreter {
         let mut local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
-        let type_arguments = self.generate_type_holes(&obj_decl.type_params);
+        let mut obj = Object {
+            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            name: obj_decl.type_name.clone(),
+            type_arguments: Vec::new(),
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            vtables: HashMap::new(),
+        };
 
-        let fields = obj_decl
+        let obj_kind_hash = obj.kind_hash(&self.kind_table);
+        obj.type_arguments = self.generate_type_holes(&obj_kind_hash, &obj_decl.type_params);
+
+        obj.fields = obj_decl
             .fields
             .iter()
             .map(|tvd| {
@@ -574,20 +586,10 @@ impl Evaluator for Interpreter {
                 (tvd.name.clone(), type_ref)
             })
             .collect();
-
-        let obj = Object {
-            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
-            name: obj_decl.type_name.clone(),
-            type_arguments,
-            fields,
-            methods: HashMap::new(),
-            vtables: HashMap::new(),
-        };
-
-        let obj_kind_hash = obj.kind_hash(&self.kind_table);
+        
         self.kind_table.create(Kind::Object(Arc::new(RwLock::new(obj))));
-
         let reference_to_obj = Reference::create_type_reference(KindHash::clone(&obj_kind_hash), &mut self.heap);
+        self.current_env.write().unwrap().define(String::from(SELF_TYPE_SYMBOL_NAME), Reference::clone(&reference_to_obj));
 
         let methods = obj_decl.methods
             .iter()
@@ -614,16 +616,17 @@ impl Evaluator for Interpreter {
         let mut local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
-        let type_arguments = self.generate_type_holes(&contract_decl.type_params);
-
-        let contract = Contract {
+        let mut contract = Contract {
             parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
             name: contract_decl.type_name.clone(),
-            type_arguments,
+            type_arguments: Vec::new(),
             required_functions: Vec::new(),
         };
 
         let contract_kind_hash = contract.kind_hash(&self.kind_table);
+
+        contract.type_arguments = self.generate_type_holes(&contract_kind_hash, &contract_decl.type_params);
+
         self.kind_table.create(Kind::Contract(Arc::new(RwLock::new(contract))));
 
         let reference_to_contract = Reference::create_type_reference(KindHash::clone(&contract_kind_hash), &mut self.heap);
@@ -807,20 +810,6 @@ impl Evaluator for Interpreter {
     fn visit_function_declaration(&mut self, func_decl: &parse_tree::FunctionDeclaration) {
         let name = &func_decl.signature.name;
 
-        let already_exists = {
-            self.current_env
-                .read()
-                .unwrap()
-                .get_reference_by_name(name)
-                .is_some()
-        };
-
-        if already_exists {
-            let message = format!("function '{}' already defined in the current environment",
-                                  name);
-            panic!(message);
-        }
-
         self.visit_function_signature(&func_decl.signature);
         let func_sig_ref = self.current_env
             .read()
@@ -862,7 +851,16 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature) {
-        let type_params = self.generate_type_holes(&func_sig_syntax.type_parameters);
+        let mut func_sig = FunctionSignature {
+            parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+            name: func_sig_syntax.name.clone(),
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            returns: None,
+        };
+
+        let func_sig_kind_hash = func_sig.kind_hash(&self.kind_table);
+        func_sig.type_parameters = self.generate_type_holes(&func_sig_kind_hash, &func_sig_syntax.type_parameters);
 
         let mut parameters = Vec::new();
         for param in func_sig_syntax.parameters.iter() {
@@ -880,20 +878,14 @@ impl Evaluator for Interpreter {
 
             parameters.push(p);
         }
+        func_sig.parameters = parameters;
 
-        let returns = match func_sig_syntax.returns {
+        func_sig.returns = match func_sig_syntax.returns {
             Some(ref expr) => {
                 self.visit_expression(&expr);
                 Some(self.stack.pop().unwrap().get_ty())
             },
             None => None,
-        };
-
-        let func_sig = FunctionSignature {
-            name: func_sig_syntax.name.clone(),
-            type_parameters: type_params,
-            parameters,
-            returns,
         };
 
         let item = Item::TypeReference(func_sig.kind_hash(&self.kind_table));
@@ -1334,11 +1326,11 @@ impl Evaluator for Interpreter {
         
         let result = func.call(self, args);
 
-        if let Some(sig) = func.signature(&self.kind_table) {
-            if let Some(ref _ret) = sig.read().unwrap().returns {
-                // TODO -> type check
-                self.stack.push(Value::Reference(result.unwrap()))
-            }
+        let func_sig = self.kind_table.load(&func.signature()).unwrap().to_func_sig().unwrap();
+        let func_sig_readable = func_sig.read().unwrap();
+        if let Some(ref _ret) = func_sig_readable.returns {
+            // TODO -> type check
+            self.stack.push(Value::Reference(result.unwrap()))
         }
     }
 
@@ -1537,7 +1529,7 @@ impl Callable<Interpreter> for PelFunction {
         if signature.read().unwrap().parameters.len() != args.len() {
             let message = format!(
                 "invalid number of parameters in application of function: {}. expected {}, got {}",
-                self.kind_hash(&interpreter.kind_table),
+                self.signature,
                 signature.read().unwrap().parameters.len(),
                 args.len()
             );

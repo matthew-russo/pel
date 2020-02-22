@@ -5,9 +5,12 @@ use super::evaluator::{
     Heap,
     Kind,
     KindHash,
+    KindHashable,
     KindTable,
     Item,
     Function,
+    FunctionSignature,
+    Module,
     NativeFunction,
     Reference,
     ScalarType,
@@ -48,18 +51,32 @@ pub(super) fn prelude(kind_table: &mut KindTable, heap: &mut Heap) -> HashMap<St
     env.insert(DOUBLE_TY.into(), Reference::create_type_reference(ScalarType::double_kind_hash(), heap));
 
    
-    let print_func_ref = Reference::create_function(Function::NativeFunction(print_nat_fn()), &kind_table, heap);
+    let print_func_ref = Reference::create_function(Function::NativeFunction(print_nat_fn(kind_table)), kind_table, heap);
     env.insert("print".into(), print_func_ref);
 
-    let panic_func_ref = Reference::create_function(Function::NativeFunction(panic_nat_fn()), &kind_table, heap);
+    let panic_func_ref = Reference::create_function(Function::NativeFunction(panic_nat_fn(kind_table)), kind_table, heap);
     env.insert("panic".into(), panic_func_ref);
 
     env
 }
 
-fn print_nat_fn() -> Arc<RwLock<NativeFunction>> {
+fn print_nat_fn(kind_table: &mut KindTable) -> Arc<RwLock<NativeFunction>> {
+    let print_name = String::from("print");
+
+    let print_func_sig = FunctionSignature {
+        parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+        name: String::clone(&print_name),
+        type_parameters: Vec::new(),
+        parameters: vec![(String::from("to_print"), KindHash::from("pel::lang::string::String"))],
+        returns: None,
+    };
+
+    let func_sig_kind_hash = print_func_sig.kind_hash(kind_table);
+    kind_table.create(Kind::FunctionSignature(Arc::new(RwLock::new(print_func_sig))));
+
     Arc::new(RwLock::new(NativeFunction {
-        name: "print".into(),
+        name: print_name,
+        signature: func_sig_kind_hash,
         func: |interp: &mut Interpreter, args: Vec<Reference>| {
             if args.len() != 1 {
                 let message = format!(
@@ -83,9 +100,23 @@ fn print_nat_fn() -> Arc<RwLock<NativeFunction>> {
     }))
 }
 
-fn panic_nat_fn() -> Arc<RwLock<NativeFunction>> {
+fn panic_nat_fn(kind_table: &mut KindTable) -> Arc<RwLock<NativeFunction>> {
+    let panic_name = String::from("panic");
+
+    let panic_func_sig = FunctionSignature {
+        parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
+        name: String::clone(&panic_name),
+        type_parameters: Vec::new(),
+        parameters: vec![(String::from("panic_message"), KindHash::from("pel::lang::string::String"))],
+        returns: None,
+    };
+
+    let func_sig_kind_hash = panic_func_sig.kind_hash(kind_table);
+    kind_table.create(Kind::FunctionSignature(Arc::new(RwLock::new(panic_func_sig))));
+
     Arc::new(RwLock::new(NativeFunction {
-        name: "panic".into(),
+        name: panic_name,
+        signature: func_sig_kind_hash,
         func: |interp: &mut Interpreter, args: Vec<Reference>| {
             if args.len() != 1 {
                 let message = format!(

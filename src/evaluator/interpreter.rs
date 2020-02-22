@@ -173,14 +173,15 @@ impl Interpreter {
         type_params
             .iter()
             .map(|type_param_name| {
-                let type_hole = KindHash::from(format!("{}::TypeVariabe{{{}}}", context, type_param_name));
-                let addr = self.heap.alloc();
+                let type_hole = KindHash::from(format!("{}::TypeVariable{{{}}}", context, type_param_name));
+                let address = self.heap.alloc();
                 let item = Item::TypeReference(KindHash::clone(&type_hole));
+                self.heap.store(address, item);
                 let reference = Reference::HeapReference(
                     HeapReference {
                         ty: KindHash::clone(&type_hole),
                         is_self: false,
-                        address: std::u32::MAX,
+                        address,
                         size: 0,
                     }
                 );
@@ -412,7 +413,8 @@ impl Evaluator for Interpreter {
                     let val = self.stack.pop().unwrap();
                     match val {
                         Value::Reference(Reference::HeapReference(r)) => {
-                            if r.ty != KindHash::from(KIND_KIND_HASH_STR) {
+                            if r.ty != KindHash::from(KIND_KIND_HASH_STR) &&
+                                !r.ty.contains("TypeVariable") {
                                 panic!("reference must be pointing to a kind but is actually: {}", r.ty);
                             }
                             Some(self.heap.load_type_reference(r.address).unwrap())
@@ -573,6 +575,7 @@ impl Evaluator for Interpreter {
 
         let obj_kind_hash = obj.kind_hash(&self.kind_table);
         obj.type_arguments = self.generate_type_holes(&obj_kind_hash, &obj_decl.type_params);
+        let obj_kind_hash = obj.kind_hash(&self.kind_table);
 
         obj.fields = obj_decl
             .fields

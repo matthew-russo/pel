@@ -6,36 +6,34 @@ object Vec<<T>> {
   }
 
   methods {
-    public len(self) -> int {
+    func len(self) -> int; {
       return self.len;
     }
 
-    public get(self, i: int) -> T {
-      // TODO -> check bounds or use dep types?
+    func get(self, i: int) -> T; {
       return internal[i];
     }
 
-    public set(self, i: int, t: T) -> T {
-      // TODO -> check bounds or use dep types?
-      let temp = self.internal[i];
-      self.internals[i] = t;
+    func set(self, i: int, t: T) -> T; {
+      let temp: T := self.internal[i];
+      let self.internals[i]: T := t;
       return temp;
     }
 
-    public add(self, t: T) {
+    func add(self, t: T) {
       if self.len == self.capacity {
         self.double_capacity();
-      }
+      };
 
-      self.len = self.len + 1;
-      self.internal[self.len] = t;
+      let self.len: int := self.len + 1;
+      let self.internal[self.len]: T := t;
     }
 
-    private double_capacity(self) {
-      let new_internal = Array<<T>>::new(capacity * 2);
+    func double_capacity(self) {
+      let new_internal: [T] := [T; capacity * 2];
       Array.copy(self.internal, new_internal);
-      self.internal = new_internal;
-      self.capacity = self.capacity * 2;
+      let self.internal: [T] := new_internal;
+      let self.capacity: int := self.capacity * 2;
     }
   }
 }

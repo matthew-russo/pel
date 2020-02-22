@@ -1,15 +1,15 @@
-enum Maybe<T> {
+enum Maybe<<T>> {
   variants {
     Some(T),
-    None
+    None,
   }
 
   methods {
-    public is_some(self) {
+    func is_some(self) {
       match self {
-        Some(_) => true,
-        _ => false,
-      }
+        Some(_) => { return true; },
+        _ => { return false; },
+      };
     }
   }
 }

@@ -1,22 +1,22 @@
-enum Result<L, R> {
+enum Result<<L, R>> {
   variants {
     Ok(L),
     Err(R),
   }
 
   methods {
-    public is_ok(self) -> bool {
+    func is_ok(self) -> bool; {
       match self {
-        Ok(_) => true,
-        _ => false,
-      }
+        Ok(_) => { return true; },
+        _ => { return false; },
+      };
     }
 
-    public is_err(self) -> bool {
+    func is_err(self) -> bool; {
       match self {
-        Err(_) => true,
-        _ => false,
-      }
+        Err(_) => { return true; },
+        _ => { return false; },
+      };
     }
   }
 }

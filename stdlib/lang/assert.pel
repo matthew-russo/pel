@@ -1,8 +1,4 @@
-func assert<<T>>(input: T) -> AssertionValue {
-  return AssertionValue {
-    input: input,
-  };
-}
+use pel::lang::string;
 
 object AssertionValue<<T>> {
   fields {
@@ -10,11 +6,19 @@ object AssertionValue<<T>> {
   }
 
   methods {
-    func is(self, T: other) {
+    func is(self, other: T) {
       if self.input != other {
         let msg: String := String.format("assertion failed: %s is not equal to %s", self.input, other);
         panic(msg);
-      }
+      };
     }
   }
 }
+
+func assert<<T>>(input: T) -> AssertionValue; {
+  return AssertionValue {
+    input: input,
+  };
+}
+
+

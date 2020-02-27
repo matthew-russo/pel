@@ -510,7 +510,7 @@ impl Evaluator for Interpreter {
                     let nat_func_sig = FunctionSignature {
                         parent: KindHash::clone(&enu_kind_hash),
                         name: String::clone(&vd.name),
-                        type_parameters: Vec::new(),
+                        type_arguments: Vec::new(),
                         parameters: vec![/*(String, KindHash*/],
                         returns: Some(KindHash::clone(&enu_kind_hash)),
                     };
@@ -867,13 +867,13 @@ impl Evaluator for Interpreter {
         let mut func_sig = FunctionSignature {
             parent: KindHash::clone(&self.current_module),
             name: func_sig_syntax.name.clone(),
-            type_parameters: Vec::new(),
+            type_arguments: Vec::new(),
             parameters: Vec::new(),
             returns: None,
         };
 
         let func_sig_kind_hash = func_sig.kind_hash(&self.kind_table);
-        func_sig.type_parameters = self.generate_type_holes(&func_sig_kind_hash, &func_sig_syntax.type_parameters);
+        func_sig.type_arguments = self.generate_type_holes(&func_sig_kind_hash, &func_sig_syntax.type_parameters);
 
         let mut parameters = Vec::new();
         for param in func_sig_syntax.parameters.iter() {
@@ -1360,15 +1360,26 @@ impl Evaluator for Interpreter {
     fn visit_type_application(&mut self, type_app: &parse_tree::TypeApplication) {
         let to_apply_to_ref = self.stack.pop().unwrap().to_ref().unwrap();
         let to_apply_to_heap_ref = to_apply_to_ref.to_heap_ref().unwrap();
-        println!("type_app: {:?}", to_apply_to_ref);
-        println!("to_apply_to_ref: {:?}", to_apply_to_ref);
-        println!("to_apply_to_kind: {:?}", self.heap.load(to_apply_to_heap_ref.address));
 
-        // TODO -> to_apply_to_kind is a function, which isn't a kind. we need to pass through the
-        // signature??
+        let mut item = self.heap.load(to_apply_to_heap_ref.address);
+        let mut maybe_func = None;
 
-        let to_apply_to_kind = self.heap.load(to_apply_to_heap_ref.address).to_type_reference().unwrap();
-        let to_apply_to = self.kind_table.load(&to_apply_to_kind).unwrap();
+        let type_ref = match item {
+            Item::Function(Function::PelFunction(pf)) => {
+                maybe_func = Some(Function::PelFunction(Arc::clone(&pf)));
+                KindHash::clone(&pf.read().unwrap().signature)
+            },
+            Item::Function(Function::NativeFunction(nf)) => {
+                maybe_func = Some(Function::NativeFunction(Arc::clone(&nf)));
+                KindHash::clone(&nf.read().unwrap().signature)
+            },
+            Item::TypeReference(kh) => {
+                KindHash::clone(&kh)
+            },
+            i => panic!("expected type refernence but got {:?}", i),
+        };
+
+        let to_apply_to = self.kind_table.load(&type_ref).unwrap();
 
         // can only apply to functions, objects, enums, ???
 
@@ -1386,9 +1397,15 @@ impl Evaluator for Interpreter {
                     panic!(message);
                 }
             },
+            Kind::FunctionSignature(ref fs_arc) => {
+                if fs_arc.read().unwrap().type_arguments.len() != type_app.args.len() {
+                    let message = format!("invalid number of type parameters in type application. expected {}, got {}", fs_arc.read().unwrap().type_arguments.len(), type_app.args.len());
+                    panic!(message);
+                }
+            },
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         }
-
+        
         let mut types = Vec::new();
         for arg in type_app.args.iter() {
             self.visit_expression(arg);
@@ -1407,6 +1424,7 @@ impl Evaluator for Interpreter {
         let mut new_type = match to_apply_to {
             Kind::Object(ref obj) => Kind::Object(Arc::new(RwLock::new(Object::clone(obj.read().unwrap().deref())))),
             Kind::Enum(ref enu)   => Kind::Enum(Arc::new(RwLock::new(Enum::clone(enu.read().unwrap().deref())))),
+            Kind::FunctionSignature(ref fs)   => Kind::FunctionSignature(Arc::new(RwLock::new(FunctionSignature::clone(fs.read().unwrap().deref())))),
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         };
 
@@ -1415,46 +1433,53 @@ impl Evaluator for Interpreter {
             Kind::Object(ref mut o) => {
                 let mut new_type_args = Vec::new();
                 let mut new_fields = HashMap::new();
-                let o_readable = o.read().unwrap();
-                let zipped_type_args_with_applied_type = o_readable
-                    .type_arguments
-                    .iter()
-                    .zip(types.into_iter());
+                
+                {
+                    let o_readable = o.read().unwrap();
+                    
+                    let zipped_type_args_with_applied_type = o_readable
+                        .type_arguments
+                        .iter()
+                        .zip(types.into_iter());
 
-                for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
-                    new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
+                    for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
+                        new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
 
-                    for (field_name, field_kind_hash) in o.read().unwrap().fields.iter() {
-                        if field_kind_hash == type_hole_kind_hash {
-                            new_fields.insert(field_name.clone(), KindHash::clone(type_to_apply));
+                        for (field_name, field_kind_hash) in o.read().unwrap().fields.iter() {
+                            if field_kind_hash == type_hole_kind_hash {
+                                new_fields.insert(field_name.clone(), KindHash::clone(type_to_apply));
+                            }
                         }
                     }
                 }
 
                 o.write().unwrap().type_arguments = new_type_args;
                 o.write().unwrap().fields = new_fields;
-
             },
             Kind::Enum(ref mut e) => {
                 // TODO -> this is copied and pasted from above. need to find where to put this logic
                 let mut new_type_args = Vec::new();
                 let mut new_variants = HashMap::new();
-                let e_readable = e.read().unwrap();
-                let zipped_type_args_with_applied_type = e_readable
-                    .type_arguments
-                    .iter()
-                    .zip(types.into_iter());
+                
+                {
+                    let e_readable = e.read().unwrap();
 
-                for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
-                    new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
+                    let zipped_type_args_with_applied_type = e_readable
+                        .type_arguments
+                        .iter()
+                        .zip(types.into_iter());
 
-                    for (variant_name, maybe_variant_kind_hash) in e.read().unwrap().variant_tys.iter() {
-                        if let Some(variant_kind_hash) = maybe_variant_kind_hash {
-                            if variant_kind_hash == type_hole_kind_hash {
-                                new_variants.insert(variant_name.clone(), Some(KindHash::clone(type_to_apply)));
+                    for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
+                        new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
+
+                        for (variant_name, maybe_variant_kind_hash) in e.read().unwrap().variant_tys.iter() {
+                            if let Some(variant_kind_hash) = maybe_variant_kind_hash {
+                                if variant_kind_hash == type_hole_kind_hash {
+                                    new_variants.insert(variant_name.clone(), Some(KindHash::clone(type_to_apply)));
+                                }
+                            } else {
+                                new_variants.insert(variant_name.clone(), None);
                             }
-                        } else {
-                            new_variants.insert(variant_name.clone(), None);
                         }
                     }
                 }
@@ -1462,15 +1487,65 @@ impl Evaluator for Interpreter {
                 e.write().unwrap().type_arguments = new_type_args;
                 e.write().unwrap().variant_tys = new_variants;
             },
+            Kind::FunctionSignature(ref mut fs) => {
+                let mut new_type_args = Vec::new();
+                let mut new_parameters = Vec::new();
+
+                {
+                    let fs_readable = fs.read().unwrap();
+
+                    let zipped_type_args_with_applied_type = fs_readable
+                        .type_arguments
+                        .iter()
+                        .zip(types.into_iter());
+
+                    for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
+                        new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
+
+                        for (param_name, param_kind_hash) in fs.read().unwrap().parameters.iter() {
+                            if param_kind_hash == type_hole_kind_hash {
+                                new_parameters.push((param_name.clone(), KindHash::clone(type_to_apply)));
+                            }
+                        }
+                    }
+                }
+
+                println!("NEW_TYPE_ARGS: {:?}", new_type_args);
+                println!("NEW_PARAMETERS: {:?}", new_parameters);
+                fs.write().unwrap().type_arguments = new_type_args;
+                fs.write().unwrap().parameters = new_parameters;
+            },
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         }
 
         // we need to check if the equivalent type already exists
+        println!("NEW_TYPE: {:?}", new_type);
         let new_type_kind_hash = new_type.kind_hash(&self.kind_table);
-        let new_type_ref = Item::TypeReference(KindHash::clone(&new_type_kind_hash));
+        println!("NEW_TYPE_KIND_HASH: {:?}", new_type_kind_hash);
         self.kind_table.create(new_type);
+
+        let new_item = if let Some(ref mut func) = maybe_func {
+            match func {
+                Function::PelFunction(pf_arc) => {
+                    let mut new_func = PelFunction::clone(pf_arc.read().unwrap().deref());
+                    new_func.signature = KindHash::clone(&new_type_kind_hash);
+                    Item::Function(Function::PelFunction(Arc::new(RwLock::new(new_func))))
+                },
+                Function::NativeFunction(nf_arc) => {
+                    let mut new_func = NativeFunction::clone(nf_arc.read().unwrap().deref());
+                    new_func.signature = KindHash::clone(&new_type_kind_hash);
+                    Item::Function(Function::NativeFunction(Arc::new(RwLock::new(new_func))))
+                },
+                f => panic!("unknown function type: {:?}", f)
+            }
+        } else {
+            Item::TypeReference(KindHash::clone(&new_type_kind_hash))
+        };
+
+        println!("NEW ITEM: {:?}", new_item);
+        
         let addr = self.heap.alloc();
-        self.heap.store(addr, new_type_ref);
+        self.heap.store(addr, new_item);
         let val = Value::Reference(Reference::HeapReference(HeapReference {
             ty: new_type_kind_hash,
             is_self: false,

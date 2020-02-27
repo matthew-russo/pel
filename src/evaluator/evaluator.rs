@@ -939,7 +939,7 @@ pub(crate) struct EnumInstance {
 pub(crate) struct FunctionSignature {
     pub parent: KindHash,
     pub name: String,
-    pub type_parameters: Vec<(String, KindHash)>,
+    pub type_arguments: Vec<(String, KindHash)>,
     pub parameters: Vec<(String, KindHash)>,
     pub returns: Option<KindHash>,
 }
@@ -950,7 +950,7 @@ impl FunctionSignature {
             return false;
         }
 
-        for ((n1, kh1), (n2, kh2)) in self.type_parameters.iter().zip(other.type_parameters.iter()) {
+        for ((n1, kh1), (n2, kh2)) in self.type_arguments.iter().zip(other.type_arguments.iter()) {
             if !Kind::is_a(kh2, kh1, table) {
                 return false;
             }

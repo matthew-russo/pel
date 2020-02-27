@@ -66,7 +66,7 @@ fn print_nat_fn(kind_table: &mut KindTable) -> Arc<RwLock<NativeFunction>> {
     let print_func_sig = FunctionSignature {
         parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
         name: String::clone(&print_name),
-        type_parameters: Vec::new(),
+        type_arguments: Vec::new(),
         parameters: vec![(String::from("to_print"), KindHash::from("pel::lang::string::String"))],
         returns: None,
     };
@@ -106,7 +106,7 @@ fn panic_nat_fn(kind_table: &mut KindTable) -> Arc<RwLock<NativeFunction>> {
     let panic_func_sig = FunctionSignature {
         parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
         name: String::clone(&panic_name),
-        type_parameters: Vec::new(),
+        type_arguments: Vec::new(),
         parameters: vec![(String::from("panic_message"), KindHash::from("pel::lang::string::String"))],
         returns: None,
     };

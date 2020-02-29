@@ -976,35 +976,35 @@ impl FunctionSignature {
 
 impl KindHashable for FunctionSignature {
     fn kind_hash(&self, table: &KindTable) -> String {
-        [KindHash::clone(&self.parent), self.name.clone()].join("::")
+        let base_hash = [KindHash::clone(&self.parent), self.name.clone()].join("::");
 
-        // let type_params = if !self.type_parameters.is_empty() {
-        //     let tp_str = self.type_parameters
-        //         .iter()
-        //         .map(|(n, kh)| KindHash::clone(kh))
-        //         .collect::<Vec<KindHash>>()
-        //         .join(", ");
-        //     format!("<{}>", tp_str)
-        // } else {
-        //     String::new()
-        // };
+        let type_params = if !self.type_arguments.is_empty() {
+            let tp_str = self.type_arguments
+                .iter()
+                .map(|(n, kh)| KindHash::clone(kh))
+                .collect::<Vec<KindHash>>()
+                .join(", ");
+            format!("<{}>", tp_str)
+        } else {
+            String::new()
+        };
 
-        // let params = if !self.parameters.is_empty() {
-        //     self.parameters
-        //         .iter()
-        //         .map(|(n, kh)| KindHash::clone(kh))
-        //         .collect::<Vec<KindHash>>()
-        //         .join(", ")
-        // } else {
-        //     String::new()
-        // };
+        let params = if !self.parameters.is_empty() {
+            self.parameters
+                .iter()
+                .map(|(n, kh)| KindHash::clone(kh))
+                .collect::<Vec<KindHash>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
 
-        // let returns = match self.returns {
-        //     Some(ref kh) => format!(" -> {}", kh),
-        //     None => String::new(),
-        // };
-        // 
-        // format!("func{} {}({}){}", type_params, self.name, params, returns)
+        let returns = match self.returns {
+            Some(ref kh) => format!(" -> {}", kh),
+            None => String::new(),
+        };
+        
+        format!("{}{}({}){}", base_hash, type_params, params, returns)
     }
 }
 

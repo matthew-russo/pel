@@ -91,8 +91,8 @@ impl Reference {
         })
     }
 
-    pub fn create_type_reference(kind_hash: KindHash, heap: &mut Heap) -> Self {
-        let item = Item::TypeReference(KindHash::clone(&kind_hash));
+    pub fn create_type_reference(kind_hash: &KindHash, heap: &mut Heap) -> Self {
+        let item = Item::TypeReference(KindHash::clone(kind_hash));
         let addr = heap.alloc();
         heap.store(addr, item);
         
@@ -641,18 +641,18 @@ pub(crate) type KindHash = String;
 pub(crate) const KIND_KIND_HASH_STR: &str = "kind";
 
 pub(crate) trait KindHashable {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash;
+    fn kind_hash(&self, kind_table: &KindTable, heap: &Heap) -> KindHash;
 }
 
 impl KindHashable for Kind {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+    fn kind_hash(&self, kind_table: &KindTable, heap: &Heap) -> KindHash {
         match self {
-            Kind::Array(a)    => a.read().unwrap().kind_hash(kind_table),
-            Kind::Object(o)   => o.read().unwrap().kind_hash(kind_table),
-            Kind::Enum(e)     => e.read().unwrap().kind_hash(kind_table),
-            Kind::Contract(c) => c.read().unwrap().kind_hash(kind_table),
-            Kind::Module(m)   => m.read().unwrap().kind_hash(kind_table),
-            Kind::FunctionSignature(fs) => fs.read().unwrap().kind_hash(kind_table),
+            Kind::Array(a)    => a.read().unwrap().kind_hash(kind_table, heap),
+            Kind::Object(o)   => o.read().unwrap().kind_hash(kind_table, heap),
+            Kind::Enum(e)     => e.read().unwrap().kind_hash(kind_table, heap),
+            Kind::Contract(c) => c.read().unwrap().kind_hash(kind_table, heap),
+            Kind::Module(m)   => m.read().unwrap().kind_hash(kind_table, heap),
+            Kind::FunctionSignature(fs) => fs.read().unwrap().kind_hash(kind_table, heap),
             Kind::ScalarType(st) => st.kind_hash(),
             Kind::Type(kh)    => KindHash::clone(kh),
             k => unimplemented!("unknown kind: {:?}", k),
@@ -661,7 +661,7 @@ impl KindHashable for Kind {
 }
 
 impl KindHashable for Object {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+    fn kind_hash(&self, kind_table: &KindTable, heap: &Heap) -> KindHash {
         let base = [KindHash::clone(&self.parent), self.name.clone()].join("::");
 
         if !self.type_arguments.is_empty() {
@@ -679,7 +679,7 @@ impl KindHashable for Object {
 }
 
 impl KindHashable for Enum {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+    fn kind_hash(&self, kind_table: &KindTable, heap: &Heap) -> KindHash {
         let base = [KindHash::clone(&self.parent), self.name.clone()].join("::");
 
         if !self.type_arguments.is_empty() {
@@ -697,7 +697,7 @@ impl KindHashable for Enum {
 }
 
 impl KindHashable for Contract {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+    fn kind_hash(&self, kind_table: &KindTable, heap: &Heap) -> KindHash {
         let base = [KindHash::clone(&self.parent), self.name.clone()].join("::");
 
         if !self.type_arguments.is_empty() {
@@ -715,7 +715,7 @@ impl KindHashable for Contract {
 }
 
 impl KindHashable for Module {
-    fn kind_hash(&self, kind_table: &KindTable) -> KindHash {
+    fn kind_hash(&self, kind_table: &KindTable, heap: &Heap) -> KindHash {
         if let Some(ref p) = self.parent {
             [KindHash::clone(p), String::clone(&self.name)].join("::")
         } else {
@@ -735,8 +735,8 @@ impl KindTable {
         }
     }
 
-    pub fn create(&mut self, kind: Kind) {
-        let key = kind.kind_hash(self);
+    pub fn create(&mut self, heap: &Heap, kind: Kind) {
+        let key = kind.kind_hash(self, heap);
         self.kinds.insert(key, kind);
     }
 
@@ -869,7 +869,7 @@ pub(crate) struct Array {
 }
 
 impl KindHashable for Array {
-    fn kind_hash(&self, table: &KindTable) -> KindHash {
+    fn kind_hash(&self, table: &KindTable, heap: &Heap) -> KindHash {
         KindHash::from(format!("[{}]", self.ty))
     }
 }
@@ -904,8 +904,9 @@ pub(crate) struct Contract {
 pub(crate) struct Object {
     pub parent: KindHash,
     pub name: String,
+    pub environment: Arc<RwLock<Environment>>,
     pub type_arguments: Vec<(String, KindHash)>,
-    pub fields: HashMap<String, KindHash>,
+    pub fields: HashMap<String, Reference>, // name of field to type reference
     pub methods: HashMap<String, Reference>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
 }
@@ -922,7 +923,7 @@ pub(crate) struct Enum {
     pub parent: KindHash,
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
-    pub variant_tys: HashMap<String, Option<KindHash>>,
+    pub variant_tys: HashMap<String, Option<Reference>>, // name of variant and optionally a reference to the type it contains
     pub variant_values: HashMap<String, Reference>,
     pub methods: HashMap<String, Reference>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
@@ -940,12 +941,12 @@ pub(crate) struct FunctionSignature {
     pub parent: KindHash,
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
-    pub parameters: Vec<(String, KindHash)>,
-    pub returns: Option<KindHash>,
+    pub parameters: Vec<(String, Reference)>, // name of parameter and a reference to the type it contains
+    pub returns: Option<Reference>,
 }
 
 impl FunctionSignature {
-    pub fn is_compatible_with(&self, other: &FunctionSignature, table: &KindTable) -> bool {
+    pub fn is_compatible_with(&self, other: &FunctionSignature, table: &KindTable, heap: &Heap) -> bool {
         if self.name != other.name {
             return false;
         }
@@ -956,15 +957,19 @@ impl FunctionSignature {
             }
         }
 
-        for ((n1, kh1), (n2, kh2)) in self.parameters.iter().zip(other.parameters.iter()) {
-            if !Kind::is_a(kh2, kh1, table) {
+        for ((n1, ty_r1), (n2, ty_r2)) in self.parameters.iter().zip(other.parameters.iter()) {
+            let kh1 = heap.load_type_reference(ty_r1.to_heap_ref().unwrap().address).unwrap();
+            let kh2 = heap.load_type_reference(ty_r2.to_heap_ref().unwrap().address).unwrap();
+            if !Kind::is_a(&kh2, &kh1, table) {
                 return false;
             }
         }
 
-        if let Some(ref ret_id) = self.returns {
-            if let Some(ref other_ret_id) = other.returns {
-                return Kind::is_a(&other_ret_id, &ret_id, table);
+        if let Some(ref ret_ty_ref) = self.returns {
+            if let Some(ref other_ret_ty_ref) = other.returns {
+                let other_ret_ty = heap.load_type_reference(other_ret_ty_ref.to_heap_ref().unwrap().address).unwrap();
+                let ret_ty = heap.load_type_reference(ret_ty_ref.to_heap_ref().unwrap().address).unwrap();
+                return Kind::is_a(&other_ret_ty, &ret_ty, table);
             } else {
                 return false;
             }
@@ -975,7 +980,7 @@ impl FunctionSignature {
 }
 
 impl KindHashable for FunctionSignature {
-    fn kind_hash(&self, table: &KindTable) -> String {
+    fn kind_hash(&self, table: &KindTable, heap: &Heap) -> String {
         let base_hash = [KindHash::clone(&self.parent), self.name.clone()].join("::");
 
         let type_params = if !self.type_arguments.is_empty() {
@@ -992,7 +997,9 @@ impl KindHashable for FunctionSignature {
         let params = if !self.parameters.is_empty() {
             self.parameters
                 .iter()
-                .map(|(n, kh)| KindHash::clone(kh))
+                .map(|(n, r)| {
+                    heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap()
+                })
                 .collect::<Vec<KindHash>>()
                 .join(", ")
         } else {
@@ -1000,7 +1007,10 @@ impl KindHashable for FunctionSignature {
         };
 
         let returns = match self.returns {
-            Some(ref kh) => format!(" -> {}", kh),
+            Some(ref r) => {
+                let kh = heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap();
+                format!(" -> {}", kh)
+            },
             None => String::new(),
         };
         
@@ -1062,6 +1072,10 @@ impl std::fmt::Debug for NativeFunction {
 pub(crate) trait Callable<E: Evaluator> {
     fn call(&self, evaluator: &mut E, args: Vec<Reference>) -> Option<Reference>;
 }
+
+// pub(crate) trait Appliable<E: Evaluator> {
+//     fn apply(&self, evaluator: &mut E, args: Vec<KindHash>) -> Option<__???__>;
+// }
 
 // Some of these are just structural / control flow
 // and some of them are actually content

@@ -358,6 +358,13 @@ impl Interpreter {
     fn load_user_module(&mut self, module_chain: &Vec<String>) {
         unimplemented!("how to load user module");
     }
+
+    fn extract_type_param_name(kind_hash: &KindHash) -> Option<String> {
+        let type_param_name_regex = regex::Regex::new(r"TypeVariable\{(\w+)\}").unwrap();
+        type_param_name_regex
+            .captures(kind_hash)
+            .map(|caps| caps[1].to_string())
+    }
 }
 
 impl Evaluator for Interpreter {
@@ -395,12 +402,13 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_enum_declaration(&mut self, enum_decl: &parse_tree::EnumDeclaration) {
-        let mut local_env = Environment::from_parent(&self.current_env);
+        let local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
         let mut enu = Enum {
             parent: KindHash::clone(&self.current_module),
             name: String::clone(&enum_decl.type_name),
+            environment: Arc::clone(&self.current_env),
             type_arguments: Vec::new(),
             variant_tys: HashMap::new(),
             variant_values: HashMap::new(),
@@ -511,6 +519,7 @@ impl Evaluator for Interpreter {
                     let nat_func_sig = FunctionSignature {
                         parent: KindHash::clone(&enu_kind_hash),
                         name: String::clone(&vd.name),
+                        environment: Arc::new(RwLock::new(Environment::root())),
                         type_arguments: Vec::new(),
                         parameters: vec![/*(String, KindHash*/],
                         returns: Some(return_ty_ref),
@@ -570,7 +579,7 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_object_declaration(&mut self, obj_decl: &parse_tree::ObjectDeclaration) {
-        let mut local_env = Environment::from_parent(&self.current_env);
+        let local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
         let mut obj = Object {
@@ -864,8 +873,12 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature) {
+        let local_env = Environment::from_parent(&self.current_env);
+        self.current_env = Arc::new(RwLock::new(local_env));
+
         let mut func_sig = FunctionSignature {
             parent: KindHash::clone(&self.current_module),
+            environment: Arc::clone(&self.current_env),
             name: func_sig_syntax.name.clone(),
             type_arguments: Vec::new(),
             parameters: Vec::new(),
@@ -914,6 +927,10 @@ impl Evaluator for Interpreter {
         });
 
         self.kind_table.create(&self.heap, Kind::FunctionSignature(Arc::new(RwLock::new(func_sig))));
+
+        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        self.current_env = parent_env;
+
         self.current_env.write().unwrap().define(func_sig_syntax.name.clone(), func_sig_ref);
     }
 
@@ -1273,6 +1290,18 @@ impl Evaluator for Interpreter {
         for (field_name, expected_ty_ref) in obj.read().unwrap().fields.iter() {
             let expected_ty = self.heap.load_type_reference(expected_ty_ref.to_heap_ref().unwrap().address).unwrap();
 
+            println!("CHECKING EXPECTED_TY: {:?}", expected_ty);
+            let expected_ty = if let Some(type_param_name) = Interpreter::extract_type_param_name(&expected_ty) {
+                println!("got type var: {:?}", type_param_name);
+                let actual_param_ref = obj.read().unwrap().environment.read().unwrap().get_reference_by_name(&type_param_name).unwrap();
+                let r = self.heap.load_type_reference(actual_param_ref.to_heap_ref().unwrap().address).unwrap();
+                println!("it refers to: {:?}\n\n", r);
+                r
+            } else {
+                println!("not a type variable\n\n");
+                expected_ty
+            };
+
             if !obj_init.fields.contains_key(field_name) {
                 let message = format!(
                     "expected field '{}' in object initialization not present in {:?}",
@@ -1363,7 +1392,7 @@ impl Evaluator for Interpreter {
         let to_apply_to_ref = self.stack.pop().unwrap().to_ref().unwrap();
         let to_apply_to_heap_ref = to_apply_to_ref.to_heap_ref().unwrap();
 
-        let mut item = self.heap.load(to_apply_to_heap_ref.address);
+        let item = self.heap.load(to_apply_to_heap_ref.address);
         let mut maybe_func = None;
 
         let type_ref = match item {
@@ -1432,7 +1461,6 @@ impl Evaluator for Interpreter {
         match new_type {
             Kind::Object(ref mut o) => {
                 let mut new_type_args: Vec<(String, KindHash)> = Vec::new();
-                let mut new_fields = HashMap::new();
                 
                 {
                     let o_readable = o.read().unwrap();
@@ -1446,24 +1474,28 @@ impl Evaluator for Interpreter {
                         let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
                         new_type_args.push((String::clone(type_name), KindHash::clone(&type_to_apply)));
 
-                        for (field_name, field_kind_ref) in o.read().unwrap().fields.iter() {
-                            let field_kind = self.heap.load_type_reference(field_kind_ref.to_heap_ref().unwrap().address).unwrap();
-                            if &field_kind == type_hole_kind_hash {
-                                new_fields.insert(field_name.clone(), Reference::clone(type_to_apply_ref));
-                            }
-                        }
+                        let current_ref = fs_readable
+                            .environment
+                            .read()
+                            .unwrap()
+                            .get_reference_by_name(type_name)
+                            .unwrap();
+
+                        self.heap.store(current_ref.to_heap_ref().unwrap().address, Item::TypeReference(type_to_apply));
+
+                        o_readable
+                            .environment
+                            .write()
+                            .unwrap()
+                            .define(String::clone(type_name), Reference::clone(type_to_apply_ref));
                     }
                 }
 
-                // TODO -> methods are not covered
-
                 o.write().unwrap().type_arguments = new_type_args;
-                o.write().unwrap().fields = new_fields;
             },
             Kind::Enum(ref mut e) => {
                 // TODO -> this is copied and pasted from above. need to find where to put this logic
                 let mut new_type_args = Vec::new();
-                let mut new_variants = HashMap::new();
                 
                 {
                     let e_readable = e.read().unwrap();
@@ -1477,27 +1509,29 @@ impl Evaluator for Interpreter {
                         let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
                         new_type_args.push((String::clone(type_name), KindHash::clone(&type_to_apply)));
 
-                        for (variant_name, maybe_variant_kind_hash) in e.read().unwrap().variant_tys.iter() {
-                            if let Some(variant_kind_ref) = maybe_variant_kind_hash {
-                                let variant_kind = self.heap.load_type_reference(variant_kind_ref.to_heap_ref().unwrap().address).unwrap();
-                                if &variant_kind == type_hole_kind_hash {
-                                    new_variants.insert(variant_name.clone(), Some(Reference::clone(type_to_apply_ref)));
-                                }
-                            } else {
-                                new_variants.insert(variant_name.clone(), None);
-                            }
-                        }
+                        let current_ref = fs_readable
+                            .environment
+                            .read()
+                            .unwrap()
+                            .get_reference_by_name(type_name)
+                            .unwrap();
+
+                        self.heap.store(current_ref.to_heap_ref().unwrap().address, Item::TypeReference(type_to_apply));
+
+                        e_readable
+                            .environment
+                            .write()
+                            .unwrap()
+                            .define(String::clone(type_name), Reference::clone(type_to_apply_ref));
                     }
                 }
                 
                 // TODO -> methods are not covered
 
                 e.write().unwrap().type_arguments = new_type_args;
-                e.write().unwrap().variant_tys = new_variants;
             },
             Kind::FunctionSignature(ref mut fs) => {
                 let mut new_type_args = Vec::new();
-                let mut new_parameters = Vec::new();
 
                 {
                     let fs_readable = fs.read().unwrap();
@@ -1511,23 +1545,24 @@ impl Evaluator for Interpreter {
                         let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
                         new_type_args.push((String::clone(type_name), KindHash::clone(&type_to_apply)));
 
-                        for (param_name, param_kind_ref) in fs.read().unwrap().parameters.iter() {
-                            let param_kind = self.heap.load_type_reference(param_kind_ref.to_heap_ref().unwrap().address).unwrap();
-                            if &param_kind == type_hole_kind_hash {
-                                let type_ref = Reference::create_type_reference(&type_to_apply, &mut self.heap);
-                                new_parameters.push((param_name.clone(), type_ref));
-                            }
-                        }
-                        // if let Some(kh) = fs_readable.returns {
+                        let current_ref = fs_readable
+                            .environment
+                            .read()
+                            .unwrap()
+                            .get_reference_by_name(type_name)
+                            .unwrap();
 
-                        // }
+                        self.heap.store(current_ref.to_heap_ref().unwrap().address, Item::TypeReference(type_to_apply));
+                        fs_readable
+                            .environment
+                            .write()
+                            .unwrap()
+                            .define(String::clone(type_name), Reference::clone(type_to_apply_ref));
                     }
                 }
 
                 println!("NEW_TYPE_ARGS: {:?}", new_type_args);
-                println!("NEW_PARAMETERS: {:?}", new_parameters);
                 fs.write().unwrap().type_arguments = new_type_args;
-                fs.write().unwrap().parameters = new_parameters;
             },
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         }
@@ -1657,6 +1692,14 @@ impl Callable<Interpreter> for PelFunction {
         let mut func_app_local_env = Environment::from_parent(&self.environment);
         for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
             let param_kind = interpreter.heap.load_type_reference(param_kind_ref.to_heap_ref().unwrap().address).unwrap();
+
+            let param_kind = if let Some(type_param_name) = Interpreter::extract_type_param_name(&param_kind) {
+                let actual_param_ref = signature.read().unwrap().environment.read().unwrap().get_reference_by_name(&type_param_name).unwrap();
+                interpreter.heap.load_type_reference(actual_param_ref.to_heap_ref().unwrap().address).unwrap()
+            } else {
+                param_kind
+            };
+
             if arg_ref.get_ty() != param_kind {
                 panic!("expected argument with type: {}, got: {}",
                        param_kind,

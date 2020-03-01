@@ -922,6 +922,7 @@ pub(crate) struct ObjectInstance {
 pub(crate) struct Enum {
     pub parent: KindHash,
     pub name: String,
+    pub environment: Arc<RwLock<Environment>>,
     pub type_arguments: Vec<(String, KindHash)>,
     pub variant_tys: HashMap<String, Option<Reference>>, // name of variant and optionally a reference to the type it contains
     pub variant_values: HashMap<String, Reference>,
@@ -940,6 +941,7 @@ pub(crate) struct EnumInstance {
 pub(crate) struct FunctionSignature {
     pub parent: KindHash,
     pub name: String,
+    pub environment: Arc<RwLock<Environment>>,
     pub type_arguments: Vec<(String, KindHash)>,
     pub parameters: Vec<(String, Reference)>, // name of parameter and a reference to the type it contains
     pub returns: Option<Reference>,

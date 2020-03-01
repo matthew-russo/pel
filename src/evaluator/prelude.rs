@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use super::evaluator::{
+    Environment,
     Heap,
     Kind,
     KindHash,
@@ -68,6 +69,7 @@ fn print_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Arc<RwLock<Nativ
     let print_func_sig = FunctionSignature {
         parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
         name: String::clone(&print_name),
+        environment: Arc::new(RwLock::new(Environment::root())),
         type_arguments: Vec::new(),
         parameters: vec![(String::from("to_print"), Reference::create_type_reference(&KindHash::from(STRING_TY), heap))],
         returns: None,
@@ -108,6 +110,7 @@ fn panic_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Arc<RwLock<Nativ
     let panic_func_sig = FunctionSignature {
         parent: KindHash::from(Module::MAIN_MODULE_KIND_HASH),
         name: String::clone(&panic_name),
+        environment: Arc::new(RwLock::new(Environment::root())),
         type_arguments: Vec::new(),
         parameters: vec![(String::from("panic_message"), Reference::create_type_reference(&KindHash::from(STRING_TY), heap))],
         returns: None,

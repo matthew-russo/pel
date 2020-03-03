@@ -1159,15 +1159,22 @@ impl Evaluator for Interpreter {
 
                 if reference.is_self {
                     if let Some(v) = oi_readable.fields.get(&field_access.field_name) {
-                            self.stack.push(Value::clone(v));
-                            return;
+                        self.stack.push(Value::clone(v));
+                        return;
                     }
 
                     // we want to check methods here becuase a reference that is both self and
                     // has a contract_ty, it can still access regular methods
                     if let Some(func) = self.get_obj_method_with_name(obj.read().unwrap().deref(), &field_access.field_name) {
-                        // TODO -> push func reference
-                        // TODO -> push self reference
+                        let obj_self_ref = Value::Reference(Reference::HeapReference(HeapReference {
+                            ty: KindHash::clone(&reference.ty),
+                            is_self: true,
+                            address: reference.address,
+                            size: std::u32::MAX,
+                        }));
+                        self.stack.push(obj_self_ref);
+                        self.stack.push(Value::Reference(func));
+                        return
                     }
                 }
 
@@ -1177,11 +1184,20 @@ impl Evaluator for Interpreter {
                     let obj_readable = obj.read().unwrap();
                     let vtable_id = obj_readable.vtables.get(contract_kind_hash).unwrap();
                     let vtable = self.vtables.load_vtable(*vtable_id);
+
+                    // TODO -> something else? i need to actually look up the method in the vtable
                 }
 
                 if let Some(func) = self.get_obj_method_with_name(obj.read().unwrap().deref(), &field_access.field_name) {
-                        // TODO -> push func reference
-                        // TODO -> push self reference
+                    let obj_self_ref = Value::Reference(Reference::HeapReference(HeapReference {
+                        ty: KindHash::clone(&reference.ty),
+                        is_self: true,
+                        address: reference.address,
+                        size: std::u32::MAX,
+                    }));
+                    self.stack.push(obj_self_ref);
+                    self.stack.push(Value::Reference(func));
+                    return
                 }
 
                 let message = format!("unknown method '{}' of object: {}.",
@@ -1474,7 +1490,7 @@ impl Evaluator for Interpreter {
                         let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
                         new_type_args.push((String::clone(type_name), KindHash::clone(&type_to_apply)));
 
-                        let current_ref = fs_readable
+                        let current_ref = o_readable
                             .environment
                             .read()
                             .unwrap()
@@ -1509,7 +1525,7 @@ impl Evaluator for Interpreter {
                         let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
                         new_type_args.push((String::clone(type_name), KindHash::clone(&type_to_apply)));
 
-                        let current_ref = fs_readable
+                        let current_ref = e_readable
                             .environment
                             .read()
                             .unwrap()

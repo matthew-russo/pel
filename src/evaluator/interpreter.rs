@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fs;
 use std::ops::{Deref};
 use std::path::Path;
@@ -469,18 +470,19 @@ impl Evaluator for Interpreter {
                         size: std::u32::MAX,
                     }))
                 } else {
-                    let enum_constructor = |interp: &mut Interpreter, args: Vec<Reference>| {
-                        let enu_kind_hash = interp.heap.load(args[0].to_heap_ref().unwrap().address).to_type_reference().unwrap();
+                    let enum_constructor = |interp: &mut Interpreter, args: Vec<Value>| {
+                        let enu_kind_hash = interp.heap.load(args[0].to_ref().unwrap().to_heap_ref().unwrap().address).to_type_reference().unwrap();
 
-                        let variant_name_item = interp.heap.load(args[1].to_heap_ref().unwrap().address);
+                        let variant_name_item = interp.heap.load(args[1].to_ref().unwrap().to_heap_ref().unwrap().address);
                         let variant_name = pel_utils::pel_string_to_rust_string(&variant_name_item, &mut interp.heap).unwrap();
 
-                        let does_contain_ty = interp.stack[args[2].to_stack_ref().unwrap().index].to_scalar().unwrap().to_bool().unwrap();
+                        let does_contain_ty = interp.stack[args[2].to_ref().unwrap().to_stack_ref().unwrap().index].to_scalar().unwrap().to_bool().unwrap();
 
                         let contains = if does_contain_ty {
-                            let contains_kind_hash = interp.heap.load_type_reference(args[3].to_heap_ref().unwrap().address).unwrap();
+                            let contains_kind_hash = interp.heap.load_type_reference(args[3].to_ref().unwrap().to_heap_ref().unwrap().address).unwrap();
 
-                            let contains_heap_ref = args[4].to_heap_ref().unwrap();
+                            let contains_ref = args[4].to_ref().unwrap();
+                            let contains_heap_ref = contains_ref.to_heap_ref().unwrap();
 
                             if contains_heap_ref.ty != contains_kind_hash {
                                 let message = format!("expected enum variant: {} to contain type {:?}, but got {}",
@@ -511,7 +513,7 @@ impl Evaluator for Interpreter {
                             address: addr,
                             size: std::u32::MAX,
                         });
-                        Some(reference)
+                        Some(Value::Reference(reference))
                     };
 
                     // TODO -> need to get the signature of this?
@@ -984,6 +986,7 @@ impl Evaluator for Interpreter {
 
     fn visit_return(&mut self, return_stmt: &parse_tree::Return) {
         self.visit_expression(&return_stmt.value);
+        println!("and the stack is now... {:?}", self.stack);
         self.exiting = true;
     }
 
@@ -1029,12 +1032,12 @@ impl Evaluator for Interpreter {
                     let scalar = Scalar::from(value);
                     let scalar_ty = scalar.get_ty();
                     self.stack.push(Value::Scalar(scalar));
-                    let stack_ref = Reference::StackReference(StackReference {
-                        ty: scalar_ty,
-                        index: self.stack.len() - 1,
-                        size: std::u32::MAX,
-                    });
-                    self.stack.push(Value::Reference(stack_ref));
+                    // let stack_ref = Reference::StackReference(StackReference {
+                    //     ty: scalar_ty,
+                    //     index: self.stack.len() - 1,
+                    //     size: std::u32::MAX,
+                    // });
+                    // self.stack.push(Value::Reference(stack_ref));
                 }
             },
             ArrayType(ref arr_ty) => {
@@ -1345,6 +1348,7 @@ impl Evaluator for Interpreter {
             field_values.insert(field_name.clone(), field_value);
         }
 
+        println!("oh it stack now: {:?}", self.stack);
         let obj_instance = ObjectInstance {
             ty: KindHash::clone(&obj_hash),
             contract_ty: None,
@@ -1361,6 +1365,7 @@ impl Evaluator for Interpreter {
         });
         let value = Value::Reference(reference);
         self.stack.push(value);
+        println!("oh it stack now: {:?}", self.stack);
     }
 
     fn visit_function_application(&mut self, func_app: &parse_tree::FunctionApplication) {
@@ -1383,24 +1388,39 @@ impl Evaluator for Interpreter {
             }
         };
 
-        let args = func_app.args
+        println!("STACK BEFORE: {:?}", self.stack);
+
+        let mut args: VecDeque<Value> = func_app.args
             .iter()
             .map(|expr| {
                 self.visit_expression(expr);
+                println!("after visit: {:?}", self.stack);
                 let top_of_stack = self.stack.pop().unwrap();
-                top_of_stack.to_ref().unwrap()
+                top_of_stack
             })
             .collect();
+        
+        println!("STACK AFTER: {:?}", self.stack);
+
+
+        let sig = self.kind_table.load(&func.signature()).unwrap().to_func_sig().unwrap();
+        if let Some((param_name, param_type)) = sig.read().unwrap().parameters.get(0) {
+            if SELF_VAR_SYMBOL_NAME == param_name {
+                println!("OY OY STACK IS: {:?}", self.stack);
+                let s = self.stack.pop().unwrap();
+                args.push_front(s);
+            }
+        }
 
         // TODO -> type_check args?
         
-        let result = func.call(self, args);
+        let result = func.call(self, args.into_iter().collect());
 
         let func_sig = self.kind_table.load(&func.signature()).unwrap().to_func_sig().unwrap();
         let func_sig_readable = func_sig.read().unwrap();
         if let Some(ref _ret) = func_sig_readable.returns {
             // TODO -> type check
-            self.stack.push(Value::Reference(result.unwrap()))
+            self.stack.push(result.unwrap())
         }
     }
 
@@ -1667,19 +1687,19 @@ impl Evaluator for Interpreter {
 }
 
 impl Callable<Interpreter> for Object {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Enum {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Function {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         match self {
             Function::NativeFunction(nf_arc) => nf_arc.read().unwrap().call(interpreter, args),
             Function::PelFunction(pf_arc)    => pf_arc.read().unwrap().call(interpreter, args),
@@ -1688,7 +1708,7 @@ impl Callable<Interpreter> for Function {
 }
 
 impl Callable<Interpreter> for PelFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         let signature = interpreter.kind_table
             .load(&self.signature)
             .unwrap()
@@ -1706,7 +1726,7 @@ impl Callable<Interpreter> for PelFunction {
         }
 
         let mut func_app_local_env = Environment::from_parent(&self.environment);
-        for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
+        for ((ref n, ref param_kind_ref), ref arg_val) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
             let param_kind = interpreter.heap.load_type_reference(param_kind_ref.to_heap_ref().unwrap().address).unwrap();
 
             let param_kind = if let Some(type_param_name) = Interpreter::extract_type_param_name(&param_kind) {
@@ -1716,13 +1736,19 @@ impl Callable<Interpreter> for PelFunction {
                 param_kind
             };
 
-            if arg_ref.get_ty() != param_kind {
+            if arg_val.get_ty() != param_kind {
                 panic!("expected argument with type: {}, got: {}",
                        param_kind,
-                       arg_ref.get_ty());
+                       arg_val.get_ty());
             }
 
-            func_app_local_env.define(n.clone(), Reference::clone(arg_ref));
+            let arg_ref = match arg_val {
+                Value::Scalar(s) => {
+
+                },
+                Value::Reference(r) => r,
+            }
+            func_app_local_env.define(n.clone(), Reference::clone(&arg_val.to_ref().unwrap()));
         }
 
         let current_env = Arc::clone(&interpreter.current_env);
@@ -1733,7 +1759,7 @@ impl Callable<Interpreter> for PelFunction {
         let sig_readable = signature.read().unwrap();
         if let Some(ref _type_sym) = sig_readable.returns {
             // TODO -> type check return based on the expected `type_sym`
-            Some(interpreter.stack.pop().unwrap().to_ref().unwrap())
+            Some(interpreter.stack.pop().unwrap())
         } else {
             None
         }
@@ -1741,7 +1767,7 @@ impl Callable<Interpreter> for PelFunction {
 }
 
 impl Callable<Interpreter> for NativeFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
         (self.func)(interpreter, args)
     }
 }

@@ -81,7 +81,7 @@ fn print_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Arc<RwLock<Nativ
     Arc::new(RwLock::new(NativeFunction {
         name: print_name,
         signature: func_sig_kind_hash,
-        func: |interp: &mut Interpreter, args: Vec<Reference>| {
+        func: |interp: &mut Interpreter, args: Vec<Value>| {
             if args.len() != 1 {
                 let message = format!(
                     "invalid number of parameters function call. expected 1, got {}",
@@ -90,7 +90,8 @@ fn print_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Arc<RwLock<Nativ
                 panic!(message);
             }
 
-            let arg_heap_ref = args[0].to_heap_ref().unwrap();
+            let arg_ref = args[0].to_ref().unwrap();
+            let arg_heap_ref = arg_ref.to_heap_ref().unwrap();
             let item = interp.heap.load(arg_heap_ref.address);
             let maybe_rust_str = pel_utils::pel_string_to_rust_string(&item, &mut interp.heap);
             if let Some(rust_str) = maybe_rust_str {
@@ -122,7 +123,7 @@ fn panic_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Arc<RwLock<Nativ
     Arc::new(RwLock::new(NativeFunction {
         name: panic_name,
         signature: func_sig_kind_hash,
-        func: |interp: &mut Interpreter, args: Vec<Reference>| {
+        func: |interp: &mut Interpreter, args: Vec<Value>| {
             if args.len() != 1 {
                 let message = format!(
                     "invalid number of parameters function call. expected 1, got {}",
@@ -130,8 +131,9 @@ fn panic_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Arc<RwLock<Nativ
                 );
                 panic!(message);
             }
-
-            let arg_heap_ref = args[0].to_heap_ref().unwrap();
+            
+            let arg_ref = args[0].to_ref().unwrap();
+            let arg_heap_ref = arg_ref.to_heap_ref().unwrap();
             let item = interp.heap.load(arg_heap_ref.address);
             let maybe_rust_str = pel_utils::pel_string_to_rust_string(&item, &mut interp.heap);
             if let Some(rust_str) = maybe_rust_str {

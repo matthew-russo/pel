@@ -1062,7 +1062,7 @@ pub(crate) struct PelFunction {
 pub(crate) struct NativeFunction {
     pub name: String,
     pub signature: KindHash,
-    pub func: fn(&mut Interpreter, Vec<Value>) -> Option<Value>,
+    pub func: fn(&mut Interpreter, Vec<Reference>) -> Option<Reference>,
 }
 
 impl std::fmt::Debug for NativeFunction {
@@ -1072,7 +1072,7 @@ impl std::fmt::Debug for NativeFunction {
 }
 
 pub(crate) trait Callable<E: Evaluator> {
-    fn call(&self, evaluator: &mut E, args: Vec<Value>) -> Option<Value>;
+    fn call(&self, evaluator: &mut E, args: Vec<Reference>) -> Option<Reference>;
 }
 
 // pub(crate) trait Appliable<E: Evaluator> {

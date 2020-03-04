@@ -470,18 +470,18 @@ impl Evaluator for Interpreter {
                         size: std::u32::MAX,
                     }))
                 } else {
-                    let enum_constructor = |interp: &mut Interpreter, args: Vec<Value>| {
-                        let enu_kind_hash = interp.heap.load(args[0].to_ref().unwrap().to_heap_ref().unwrap().address).to_type_reference().unwrap();
+                    let enum_constructor = |interp: &mut Interpreter, args: Vec<Reference>| {
+                        let enu_kind_hash = interp.heap.load(args[0].to_heap_ref().unwrap().address).to_type_reference().unwrap();
 
-                        let variant_name_item = interp.heap.load(args[1].to_ref().unwrap().to_heap_ref().unwrap().address);
+                        let variant_name_item = interp.heap.load(args[1].to_heap_ref().unwrap().address);
                         let variant_name = pel_utils::pel_string_to_rust_string(&variant_name_item, &mut interp.heap).unwrap();
 
-                        let does_contain_ty = interp.stack[args[2].to_ref().unwrap().to_stack_ref().unwrap().index].to_scalar().unwrap().to_bool().unwrap();
+                        let does_contain_ty = interp.stack[args[2].to_stack_ref().unwrap().index].to_scalar().unwrap().to_bool().unwrap();
 
                         let contains = if does_contain_ty {
-                            let contains_kind_hash = interp.heap.load_type_reference(args[3].to_ref().unwrap().to_heap_ref().unwrap().address).unwrap();
+                            let contains_kind_hash = interp.heap.load_type_reference(args[3].to_heap_ref().unwrap().address).unwrap();
 
-                            let contains_ref = args[4].to_ref().unwrap();
+                            let contains_ref = args[4];
                             let contains_heap_ref = contains_ref.to_heap_ref().unwrap();
 
                             if contains_heap_ref.ty != contains_kind_hash {
@@ -513,7 +513,7 @@ impl Evaluator for Interpreter {
                             address: addr,
                             size: std::u32::MAX,
                         });
-                        Some(Value::Reference(reference))
+                        Some(reference)
                     };
 
                     // TODO -> need to get the signature of this?
@@ -1406,8 +1406,8 @@ impl Evaluator for Interpreter {
         let sig = self.kind_table.load(&func.signature()).unwrap().to_func_sig().unwrap();
         if let Some((param_name, param_type)) = sig.read().unwrap().parameters.get(0) {
             if SELF_VAR_SYMBOL_NAME == param_name {
-                println!("OY OY STACK IS: {:?}", self.stack);
-                let s = self.stack.pop().unwrap();
+                // CREAT STACK REF TO TOP
+                //
                 args.push_front(s);
             }
         }
@@ -1420,7 +1420,7 @@ impl Evaluator for Interpreter {
         let func_sig_readable = func_sig.read().unwrap();
         if let Some(ref _ret) = func_sig_readable.returns {
             // TODO -> type check
-            self.stack.push(result.unwrap())
+            self.stack.push(Value::Reference(result.unwrap()))
         }
     }
 
@@ -1687,19 +1687,19 @@ impl Evaluator for Interpreter {
 }
 
 impl Callable<Interpreter> for Object {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Enum {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         panic!("unimplemented");
     }
 }
 
 impl Callable<Interpreter> for Function {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         match self {
             Function::NativeFunction(nf_arc) => nf_arc.read().unwrap().call(interpreter, args),
             Function::PelFunction(pf_arc)    => pf_arc.read().unwrap().call(interpreter, args),
@@ -1708,7 +1708,7 @@ impl Callable<Interpreter> for Function {
 }
 
 impl Callable<Interpreter> for PelFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Referencev>) -> Option<Reference> {
         let signature = interpreter.kind_table
             .load(&self.signature)
             .unwrap()
@@ -1759,7 +1759,10 @@ impl Callable<Interpreter> for PelFunction {
         let sig_readable = signature.read().unwrap();
         if let Some(ref _type_sym) = sig_readable.returns {
             // TODO -> type check return based on the expected `type_sym`
-            Some(interpreter.stack.pop().unwrap())
+            let reference = match interpreter.stack.pop().unwrap()  {
+
+            }
+            Some()
         } else {
             None
         }
@@ -1767,7 +1770,7 @@ impl Callable<Interpreter> for PelFunction {
 }
 
 impl Callable<Interpreter> for NativeFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Option<Value> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         (self.func)(interpreter, args)
     }
 }

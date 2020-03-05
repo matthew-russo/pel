@@ -1160,25 +1160,41 @@ impl Evaluator for Interpreter {
             _ => unimplemented!("unknown value type in visit_field_access"),
         };
 
-        let item = match r {
+        let mut heap_ref = None;
+        match reference {
             Reference::StackReference(sr) => {
+                let mut stack_ref = sr;
                 loop {
-                    // need to recursively resolve values on the stack until its a scalar or heap
-                    // reference
-
+                    let value = self.stack.get(stack_ref.index).unwrap();
+                    match value {
+                        Value::Reference(Reference::HeapReference(hr)) => {
+                            heap_ref = Some(HeapReference::clone(hr));
+                            break;
+                        },
+                        Value::Reference(Reference::StackReference(sr)) => {
+                            stack_ref = StackReference::clone(sr);
+                        },
+                        Value::Scalar(s) => {
+                            panic!("scalar cannot be accessed with field_access syntax");
+                        }
+                    }
                 }
             },
             Reference::HeapReference(hr) => {
-                self.heap.load(reference.address)
+                heap_ref = Some(hr);
             }
         }
+
+        let heap_ref = heap_ref.unwrap();
+
+        let item = self.heap.load(heap_ref.address);
 
         match item {
             Item::ObjectInstance(oi_arc) => {
                 let oi_readable = oi_arc.read().unwrap();
                 let obj = self.kind_table.load(&oi_readable.ty).unwrap().to_object().unwrap();
 
-                if reference.is_self {
+                if heap_ref.is_self {
                     if let Some(v) = oi_readable.fields.get(&field_access.field_name) {
                         self.stack.push(Value::clone(v));
                         return;
@@ -1188,9 +1204,9 @@ impl Evaluator for Interpreter {
                     // has a contract_ty, it can still access regular methods
                     if let Some(func) = self.get_obj_method_with_name(obj.read().unwrap().deref(), &field_access.field_name) {
                         let obj_self_ref = Value::Reference(Reference::HeapReference(HeapReference {
-                            ty: KindHash::clone(&reference.ty),
+                            ty: KindHash::clone(&heap_ref.ty),
                             is_self: true,
-                            address: reference.address,
+                            address: heap_ref.address,
                             size: std::u32::MAX,
                         }));
                         self.stack.push(obj_self_ref);
@@ -1211,9 +1227,9 @@ impl Evaluator for Interpreter {
 
                 if let Some(func) = self.get_obj_method_with_name(obj.read().unwrap().deref(), &field_access.field_name) {
                     let obj_self_ref = Value::Reference(Reference::HeapReference(HeapReference {
-                        ty: KindHash::clone(&reference.ty),
+                        ty: KindHash::clone(&heap_ref.ty),
                         is_self: true,
-                        address: reference.address,
+                        address: heap_ref.address,
                         size: std::u32::MAX,
                     }));
                     self.stack.push(obj_self_ref);

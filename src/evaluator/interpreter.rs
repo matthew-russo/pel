@@ -366,6 +366,14 @@ impl Interpreter {
             .captures(kind_hash)
             .map(|caps| caps[1].to_string())
     }
+
+    fn top_of_stack_reference(&self) -> StackReference {
+        StackReference {
+            ty: self.stack[self.stack.len() - 1].get_ty(),
+            index: self.stack.len() - 1,
+            size: std::u32::MAX,
+        }
+    }
 }
 
 impl Evaluator for Interpreter {
@@ -481,8 +489,7 @@ impl Evaluator for Interpreter {
                         let contains = if does_contain_ty {
                             let contains_kind_hash = interp.heap.load_type_reference(args[3].to_heap_ref().unwrap().address).unwrap();
 
-                            let contains_ref = args[4];
-                            let contains_heap_ref = contains_ref.to_heap_ref().unwrap();
+                            let contains_heap_ref = args[4].to_heap_ref().unwrap();
 
                             if contains_heap_ref.ty != contains_kind_hash {
                                 let message = format!("expected enum variant: {} to contain type {:?}, but got {}",
@@ -1145,15 +1152,26 @@ impl Evaluator for Interpreter {
     fn visit_field_access(&mut self, field_access: &parse_tree::FieldAccess) {
         let to_access_value = self.stack.pop().unwrap();
         let reference = match to_access_value {
-            Value::Reference(Reference::HeapReference(r)) => r,
+            Value::Reference(r) => r,
             Value::Scalar(_) => {
                 let message = format!("trying to use field access syntax on a scalar or stack allocated value");
                 panic!(message);
             },
-            _ => unimplemented!("bugger"),
+            _ => unimplemented!("unknown value type in visit_field_access"),
         };
 
-        let item = self.heap.load(reference.address);
+        let item = match r {
+            Reference::StackReference(sr) => {
+                loop {
+                    // need to recursively resolve values on the stack until its a scalar or heap
+                    // reference
+
+                }
+            },
+            Reference::HeapReference(hr) => {
+                self.heap.load(reference.address)
+            }
+        }
 
         match item {
             Item::ObjectInstance(oi_arc) => {
@@ -1388,30 +1406,21 @@ impl Evaluator for Interpreter {
             }
         };
 
-        println!("STACK BEFORE: {:?}", self.stack);
-
-        let mut args: VecDeque<Value> = func_app.args
-            .iter()
-            .map(|expr| {
-                self.visit_expression(expr);
-                println!("after visit: {:?}", self.stack);
-                let top_of_stack = self.stack.pop().unwrap();
-                top_of_stack
-            })
-            .collect();
-        
-        println!("STACK AFTER: {:?}", self.stack);
-
-
+        let mut args: VecDeque<Reference> = VecDeque::new();
         let sig = self.kind_table.load(&func.signature()).unwrap().to_func_sig().unwrap();
         if let Some((param_name, param_type)) = sig.read().unwrap().parameters.get(0) {
             if SELF_VAR_SYMBOL_NAME == param_name {
-                // CREAT STACK REF TO TOP
-                //
-                args.push_front(s);
+                args.push_back(Reference::StackReference(self.top_of_stack_reference()));
             }
         }
 
+        func_app.args
+            .iter()
+            .for_each(|expr| {
+                self.visit_expression(expr);
+                args.push_back(Reference::StackReference(self.top_of_stack_reference()));
+            });
+        
         // TODO -> type_check args?
         
         let result = func.call(self, args.into_iter().collect());
@@ -1708,7 +1717,7 @@ impl Callable<Interpreter> for Function {
 }
 
 impl Callable<Interpreter> for PelFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Referencev>) -> Option<Reference> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
         let signature = interpreter.kind_table
             .load(&self.signature)
             .unwrap()
@@ -1726,7 +1735,7 @@ impl Callable<Interpreter> for PelFunction {
         }
 
         let mut func_app_local_env = Environment::from_parent(&self.environment);
-        for ((ref n, ref param_kind_ref), ref arg_val) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
+        for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
             let param_kind = interpreter.heap.load_type_reference(param_kind_ref.to_heap_ref().unwrap().address).unwrap();
 
             let param_kind = if let Some(type_param_name) = Interpreter::extract_type_param_name(&param_kind) {
@@ -1736,19 +1745,13 @@ impl Callable<Interpreter> for PelFunction {
                 param_kind
             };
 
-            if arg_val.get_ty() != param_kind {
+            if arg_ref.get_ty() != param_kind {
                 panic!("expected argument with type: {}, got: {}",
                        param_kind,
-                       arg_val.get_ty());
+                       arg_ref.get_ty());
             }
 
-            let arg_ref = match arg_val {
-                Value::Scalar(s) => {
-
-                },
-                Value::Reference(r) => r,
-            }
-            func_app_local_env.define(n.clone(), Reference::clone(&arg_val.to_ref().unwrap()));
+            func_app_local_env.define(n.clone(), Reference::clone(&arg_ref));
         }
 
         let current_env = Arc::clone(&interpreter.current_env);
@@ -1759,10 +1762,7 @@ impl Callable<Interpreter> for PelFunction {
         let sig_readable = signature.read().unwrap();
         if let Some(ref _type_sym) = sig_readable.returns {
             // TODO -> type check return based on the expected `type_sym`
-            let reference = match interpreter.stack.pop().unwrap()  {
-
-            }
-            Some()
+            Some(Reference::StackReference(interpreter.top_of_stack_reference()))
         } else {
             None
         }

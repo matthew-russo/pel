@@ -94,6 +94,7 @@ impl Reference {
     pub fn create_type_reference(kind_hash: &KindHash, heap: &mut Heap) -> Self {
         let item = Item::TypeReference(KindHash::clone(kind_hash));
         let addr = heap.alloc();
+        println!("CREATING A TYPE REFERENCE OF {:?} AT {:?}", kind_hash, addr);
         heap.store(addr, item);
         
         Reference::HeapReference(HeapReference {

@@ -367,6 +367,42 @@ impl Interpreter {
             .map(|caps| caps[1].to_string())
     }
 
+    fn resolve_polymorphic_type(kind_hash: &KindHash) -> KindHash {
+        let (base_type, polys) = Self::resolve_base(kind_hash);
+        let resolved_polys: Vec<KindHash> = polys
+            .iter()
+            .map(|poly| Self::resolve_polymorphic_type(poly))
+            .collect();
+
+        if !resolved_polys.is_empty() {
+            KindHash::from(base_type)
+        } else {
+            let joined_polys = resolved_polys.join(",");
+            KindHash::from(format!("{}<<{}>>", base_type, joined_polys))
+        }
+    }
+
+    fn resolve_base(kind_hash: &KindHash) -> (KindHash, Vec<KindHash>) {
+        // TODO -> write parser for KindHashes...
+        // let mut base: Vec<char> = Vec::new();
+        // let mut poly: Vec<char> = Vec::new();
+        // let mut polys: Vec<KindHash> = Vec::new();
+        // let mut base_done = false;
+        // for (c1, c2) in kind_hash.chars().windows() {
+        //     if c1 == '<' && c2 == '<' {
+        //         base_done = true;
+        //     }
+
+        //     if c1 != '<' && !base_done {
+        //         base.push(c1);
+        //     }
+        // 
+        //     if base_done {
+
+        //     }
+        // }
+    }
+
     fn top_of_stack_reference(&self) -> StackReference {
         StackReference {
             ty: self.stack[self.stack.len() - 1].get_ty(),
@@ -618,6 +654,7 @@ impl Evaluator for Interpreter {
         
         self.kind_table.create(&self.heap, Kind::Object(Arc::new(RwLock::new(obj))));
         let reference_to_obj = Reference::create_type_reference(&obj_kind_hash, &mut self.heap);
+        println!("OYE CREATING OBJ REFERENCE {:?} FROM KIND HASH: {:?}", obj_kind_hash, reference_to_obj);
         self.current_env.write().unwrap().define(String::from(SELF_TYPE_SYMBOL_NAME), Reference::clone(&reference_to_obj));
 
         let methods = obj_decl.methods
@@ -901,13 +938,19 @@ impl Evaluator for Interpreter {
         for param in func_sig_syntax.parameters.iter() {
             let p = match param {
                 parse_tree::FunctionParameter::SelfParam => {
-                    let param_ty = self.stack.pop().unwrap().get_ty();
-                    let param_ty_ref = Reference::create_type_reference(&param_ty, &mut self.heap);
-                    (SELF_VAR_SYMBOL_NAME.into(), param_ty_ref)
+                    let param = self.stack.pop().unwrap();
+                    // I want an object type not a type reference
+                    (SELF_VAR_SYMBOL_NAME.into(), param.to_ref().unwrap())
                 },
                 parse_tree::FunctionParameter::TypedVariableDeclarationParam(tvd) => {
                     self.visit_expression(&tvd.type_reference);
+                    // I dont know why this is working. I'm assuming I'm not properly setting the
+                    // type of other type reference to be "kind"
+                    // and then later I dont actually load the type reference
+                    // because i need a way to distinguish passing a type as an argument and
+                    // passing the type of the argument?
                     let param_ty_ref = self.stack.pop().unwrap().to_ref().unwrap();
+                    println!("hello world: {:?}", param_ty_ref);
                     (tvd.name.clone(), param_ty_ref)
                 }
             };
@@ -1752,7 +1795,11 @@ impl Callable<Interpreter> for PelFunction {
 
         let mut func_app_local_env = Environment::from_parent(&self.environment);
         for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
-            let param_kind = interpreter.heap.load_type_reference(param_kind_ref.to_heap_ref().unwrap().address).unwrap();
+            let address = param_kind_ref.to_heap_ref().unwrap().address;
+            println!("address... {:?}", address);
+            let param_kind = interpreter.heap.load_type_reference(address).unwrap();
+            println!("param_kind: {:?}", param_kind);
+            println!("arg_ref: {:?}", arg_ref);
 
             let param_kind = if let Some(type_param_name) = Interpreter::extract_type_param_name(&param_kind) {
                 let actual_param_ref = signature.read().unwrap().environment.read().unwrap().get_reference_by_name(&type_param_name).unwrap();

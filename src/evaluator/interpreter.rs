@@ -383,24 +383,8 @@ impl Interpreter {
     }
 
     fn resolve_base(kind_hash: &KindHash) -> (KindHash, Vec<KindHash>) {
-        // TODO -> write parser for KindHashes...
-        // let mut base: Vec<char> = Vec::new();
-        // let mut poly: Vec<char> = Vec::new();
-        // let mut polys: Vec<KindHash> = Vec::new();
-        // let mut base_done = false;
-        // for (c1, c2) in kind_hash.chars().windows() {
-        //     if c1 == '<' && c2 == '<' {
-        //         base_done = true;
-        //     }
-
-        //     if c1 != '<' && !base_done {
-        //         base.push(c1);
-        //     }
-        // 
-        //     if base_done {
-
-        //     }
-        // }
+        let result = KindHashParser::of(kind_hash).resolve();
+        result
     }
 
     fn top_of_stack_reference(&self) -> StackReference {

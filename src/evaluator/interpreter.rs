@@ -1508,18 +1508,83 @@ impl Evaluator for Interpreter {
             types.push(evaluated_ref);
         }
 
-        // TODO -> create new instance
-        // of either Object, Enum, or Function
+        let zipped_type_args_with_applied_types = match to_apply_to {
+            Kind::Object(ref o_arc) => {
+                let o_readable = o_arc.read().unwrap();
+                o_readable
+                    .type_arguments
+                    .iter()
+                    .zip(types.into_iter())
+            },
+            Kind::Enum(ref e_arc) => {
+                let e_readable = e_arc.read().unwrap();
+                e_readable
+                    .type_arguments
+                    .iter()
+                    .zip(types.into_iter())
+            },
+            Kind::FunctionSignature(ref fs_arc) => {
+                let fs_readable = fs_arc.read().unwrap();
+                fs_readable
+                    .type_arguments
+                    .iter()
+                    .zip(types.into_iter())
+            },
+        };
 
-        // let addr = self.heap.alloc();
-        // self.heap.store(addr, new_item);
-        // let val = Value::Reference(Reference::HeapReference(HeapReference {
-        //     ty: new_type_kind_hash,
-        //     is_self: false,
-        //     address: addr,
-        //     size: std::u32::MAX,
-        // }));
-        // self.stack.push(val);
+        let mut environment = Environment::root();
+        for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply_ref) in zipped_type_args_with_applied_types {
+            let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
+            let type_to_apply_ref = Reference::create_type_reference(&type_to_apply, &mut self.heap);
+            environment.define(String::clone(type_name), Reference::clone(&type_to_apply_ref));
+        }
+
+        let item = match to_apply_to {
+            Kind::Object(ref o_arc) => {
+                let instance = ObjectInstance {
+                    ty: to_apply_to.kind_hash(&self.kind_table, &self.heap),
+                    contract_ty: None,
+                    is_type_complete: true,
+                    environment: Arc::new(RwLock::new(environment)),
+                    fields: HashMap::new(),
+                };
+
+                Item::ObjectInstance(Arc::new(RwLock::new(instance)))
+            },
+            Kind::Enum(ref e_arc) => {
+                let instance = EnumInstance {
+                    ty: to_apply_to.kind_hash(&self.kind_table, &self.heap),
+                    contract_ty: None,
+                    is_type_complete: true,
+                    environment: Arc::new(RwLock::new(environment)),
+                    variant: (String::new(), None),
+                };
+
+                Item::EnumInstance(Arc::new(RwLock::new(instance)))
+            },
+            Kind::FunctionSignature(ref fs_arc) => {
+                let instance = PelFunction {
+                    parent: TODO,
+                    signature: to_apply_to.kind_hash(&self.kind_table, &self.heap),
+                    body: ,
+                    is_type_complete: true,
+                    environment: Arc::new(RwLock::new(environment)),
+                };
+
+                Item::Function(Function::PelFunction(Arc::new(RwLock::new(instance))))
+            },
+            _ => unreachable!(),
+        };
+
+        let addr = self.heap.alloc();
+        self.heap.store(addr, item);
+        let val = Value::Reference(Reference::HeapReference(HeapReference {
+            ty: to_apply_to.kind_hash(&self.kind_table, &self.heap),
+            is_self: false,
+            address: addr,
+            size: std::u32::MAX,
+        }));
+        self.stack.push(val);
     }
 
     fn visit_unary_operation(&mut self, _unary_op: &parse_tree::UnaryOperation) {

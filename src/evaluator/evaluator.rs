@@ -724,6 +724,7 @@ impl KindHashable for Module {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct KindTable {
     kinds: HashMap<KindHash, Kind>,
 }
@@ -742,6 +743,10 @@ impl KindTable {
 
     pub fn load(&self, to_load: &KindHash) -> Option<Kind> {
         self.kinds.get(to_load).map(Kind::clone)
+    }
+    
+    pub fn keys(&self) -> Vec<KindHash> {
+        self.kinds.keys().map(|kh| KindHash::clone(kh)).collect()
     }
 }
 
@@ -904,7 +909,6 @@ pub(crate) struct Contract {
 pub(crate) struct Object {
     pub parent: KindHash,
     pub name: String,
-    pub environment: Arc<RwLock<Environment>>,
     pub type_arguments: Vec<(String, KindHash)>,
     pub fields: HashMap<String, Reference>, // name of field to type reference
     pub methods: HashMap<String, Reference>,
@@ -915,6 +919,8 @@ pub(crate) struct Object {
 pub(crate) struct ObjectInstance {
     pub ty: KindHash,
     pub contract_ty: Option<KindHash>,
+    pub is_type_complete: bool,
+    pub environment: Arc<RwLock<Environment>>,
     pub fields: HashMap<String, Value>,
 }
 
@@ -922,7 +928,6 @@ pub(crate) struct ObjectInstance {
 pub(crate) struct Enum {
     pub parent: KindHash,
     pub name: String,
-    pub environment: Arc<RwLock<Environment>>,
     pub type_arguments: Vec<(String, KindHash)>,
     pub variant_tys: HashMap<String, Option<Reference>>, // name of variant and optionally a reference to the type it contains
     pub variant_values: HashMap<String, Reference>,
@@ -934,6 +939,8 @@ pub(crate) struct Enum {
 pub(crate) struct EnumInstance {
     pub ty: KindHash,
     pub contract_ty: Option<KindHash>,
+    pub is_type_complete: bool,
+    pub environment: Arc<RwLock<Environment>>,
     pub variant: (String, Option<Reference>),
 }
 
@@ -941,7 +948,6 @@ pub(crate) struct EnumInstance {
 pub(crate) struct FunctionSignature {
     pub parent: KindHash,
     pub name: String,
-    pub environment: Arc<RwLock<Environment>>,
     pub type_arguments: Vec<(String, KindHash)>,
     pub parameters: Vec<(String, Reference)>, // name of parameter and a reference to the type it contains
     pub returns: Option<Reference>,
@@ -983,41 +989,57 @@ impl FunctionSignature {
 
 impl KindHashable for FunctionSignature {
     fn kind_hash(&self, table: &KindTable, heap: &Heap) -> String {
-        let base_hash = [KindHash::clone(&self.parent), self.name.clone()].join("::");
+        let base = [KindHash::clone(&self.parent), self.name.clone()].join("::");
 
-        let type_params = if !self.type_arguments.is_empty() {
-            let tp_str = self.type_arguments
+        if !self.type_arguments.is_empty() {
+            let type_arg_kind_hash = self.type_arguments
                 .iter()
-                .map(|(n, kh)| KindHash::clone(kh))
+                .map(|(_, kh)| KindHash::clone(kh))
                 .collect::<Vec<KindHash>>()
-                .join(", ");
-            format!("<{}>", tp_str)
+                .join(",");
+   
+            format!("{}<<{}>>", base, type_arg_kind_hash)
         } else {
-            String::new()
-        };
-
-        let params = if !self.parameters.is_empty() {
-            self.parameters
-                .iter()
-                .map(|(n, r)| {
-                    heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap()
-                })
-                .collect::<Vec<KindHash>>()
-                .join(", ")
-        } else {
-            String::new()
-        };
-
-        let returns = match self.returns {
-            Some(ref r) => {
-                let kh = heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap();
-                format!(" -> {}", kh)
-            },
-            None => String::new(),
-        };
-        
-        format!("{}{}({}){}", base_hash, type_params, params, returns)
+            base
+        }
     }
+
+    // fn kind_hash(&self, table: &KindTable, heap: &Heap) -> String {
+    //     let base_hash = [KindHash::clone(&self.parent), self.name.clone()].join("::");
+
+    //     let type_params = if !self.type_arguments.is_empty() {
+    //         let tp_str = self.type_arguments
+    //             .iter()
+    //             .map(|(n, kh)| KindHash::clone(kh))
+    //             .collect::<Vec<KindHash>>()
+    //             .join(", ");
+    //         format!("<{}>", tp_str)
+    //     } else {
+    //         String::new()
+    //     };
+
+    //     let params = if !self.parameters.is_empty() {
+    //         self.parameters
+    //             .iter()
+    //             .map(|(n, r)| {
+    //                 heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap()
+    //             })
+    //             .collect::<Vec<KindHash>>()
+    //             .join(", ")
+    //     } else {
+    //         String::new()
+    //     };
+
+    //     let returns = match self.returns {
+    //         Some(ref r) => {
+    //             let kh = heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap();
+    //             format!(" -> {}", kh)
+    //         },
+    //         None => String::new(),
+    //     };
+    //     
+    //     format!("{}{}({}){}", base_hash, type_params, params, returns)
+    // }
 }
 
 #[derive(Clone, Debug)]
@@ -1055,6 +1077,7 @@ pub(crate) struct PelFunction {
     pub parent: KindHash,
     pub signature: KindHash,
     pub body: BlockBody,
+    pub is_type_complete: bool,
     pub environment: Arc<RwLock<Environment>>,
 }
 

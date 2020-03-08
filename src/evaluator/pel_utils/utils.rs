@@ -1,7 +1,7 @@
 use std::collections::{HashMap};
 use std::sync::{Arc, RwLock};
 
-use crate::evaluator::evaluator::{ArrayInstance, Heap, HeapReference, KindHash, Item, ObjectInstance, Reference, Scalar, Value};
+use crate::evaluator::evaluator::{ArrayInstance, Environment, Heap, HeapReference, KindHash, Item, ObjectInstance, Reference, Scalar, Value};
 use crate::evaluator::prelude::{CHAR_TY, STRING_TY, STRING_FIELD};
 
 pub(crate) fn rust_string_to_pel_string(input: &String, heap: &mut Heap) -> Reference {
@@ -38,6 +38,8 @@ fn alloc_obj_instance(arr_ref: Reference, heap: &mut Heap) -> Reference {
     let obj_instance = ObjectInstance {
         ty: STRING_TY.into(),
         contract_ty: None,
+        is_type_complete: true,
+        environment: Arc::new(RwLock::new(Environment::root())),
         fields,
     };
 

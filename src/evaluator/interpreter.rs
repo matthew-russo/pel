@@ -5,11 +5,6 @@ use std::ops::{Deref};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-use crate::lexer::lexer::Lexer;
-use crate::parser::parser::Parser;
-use crate::syntax::parse_tree;
-use crate::evaluator::pel_utils;
-use crate::evaluator::prelude;
 use crate::evaluator::evaluator::{
     Address,
     Array,
@@ -42,6 +37,12 @@ use crate::evaluator::evaluator::{
     VTables,
     VTable,
 };
+use crate::evaluator::kind_hash_resolver::resolve_kind_hash;
+use crate::evaluator::pel_utils;
+use crate::evaluator::prelude;
+use crate::lexer::lexer::Lexer;
+use crate::parser::parser::Parser;
+use crate::syntax::parse_tree;
 
 //        -- environment --            ----- state -----
 //      /                   \        /                   \
@@ -176,7 +177,7 @@ impl Interpreter {
         type_params
             .iter()
             .map(|type_param_name| {
-                let type_hole = KindHash::from(format!("{}::TypeVariable{{{}}}", context, type_param_name));
+                let type_hole = KindHash::from(format!("{}{{{}}}", context, type_param_name));
                 let address = self.heap.alloc();
                 let item = Item::TypeReference(KindHash::clone(&type_hole));
                 self.heap.store(address, item);
@@ -365,26 +366,6 @@ impl Interpreter {
         type_param_name_regex
             .captures(kind_hash)
             .map(|caps| caps[1].to_string())
-    }
-
-    fn resolve_polymorphic_type(kind_hash: &KindHash) -> KindHash {
-        let (base_type, polys) = Self::resolve_base(kind_hash);
-        let resolved_polys: Vec<KindHash> = polys
-            .iter()
-            .map(|poly| Self::resolve_polymorphic_type(poly))
-            .collect();
-
-        if !resolved_polys.is_empty() {
-            KindHash::from(base_type)
-        } else {
-            let joined_polys = resolved_polys.join(",");
-            KindHash::from(format!("{}<<{}>>", base_type, joined_polys))
-        }
-    }
-
-    fn resolve_base(kind_hash: &KindHash) -> (KindHash, Vec<KindHash>) {
-        let result = KindHashParser::of(kind_hash).resolve();
-        result
     }
 
     fn top_of_stack_reference(&self) -> StackReference {
@@ -638,7 +619,6 @@ impl Evaluator for Interpreter {
         
         self.kind_table.create(&self.heap, Kind::Object(Arc::new(RwLock::new(obj))));
         let reference_to_obj = Reference::create_type_reference(&obj_kind_hash, &mut self.heap);
-        println!("OYE CREATING OBJ REFERENCE {:?} FROM KIND HASH: {:?}", obj_kind_hash, reference_to_obj);
         self.current_env.write().unwrap().define(String::from(SELF_TYPE_SYMBOL_NAME), Reference::clone(&reference_to_obj));
 
         let methods = obj_decl.methods
@@ -934,7 +914,6 @@ impl Evaluator for Interpreter {
                     // because i need a way to distinguish passing a type as an argument and
                     // passing the type of the argument?
                     let param_ty_ref = self.stack.pop().unwrap().to_ref().unwrap();
-                    println!("hello world: {:?}", param_ty_ref);
                     (tvd.name.clone(), param_ty_ref)
                 }
             };
@@ -1020,7 +999,6 @@ impl Evaluator for Interpreter {
 
     fn visit_return(&mut self, return_stmt: &parse_tree::Return) {
         self.visit_expression(&return_stmt.value);
-        println!("and the stack is now... {:?}", self.stack);
         self.exiting = true;
     }
 
@@ -1370,15 +1348,11 @@ impl Evaluator for Interpreter {
         for (field_name, expected_ty_ref) in obj.read().unwrap().fields.iter() {
             let expected_ty = self.heap.load_type_reference(expected_ty_ref.to_heap_ref().unwrap().address).unwrap();
 
-            println!("CHECKING EXPECTED_TY: {:?}", expected_ty);
             let expected_ty = if let Some(type_param_name) = Interpreter::extract_type_param_name(&expected_ty) {
-                println!("got type var: {:?}", type_param_name);
                 let actual_param_ref = obj.read().unwrap().environment.read().unwrap().get_reference_by_name(&type_param_name).unwrap();
                 let r = self.heap.load_type_reference(actual_param_ref.to_heap_ref().unwrap().address).unwrap();
-                println!("it refers to: {:?}\n\n", r);
                 r
             } else {
-                println!("not a type variable\n\n");
                 expected_ty
             };
 
@@ -1409,7 +1383,6 @@ impl Evaluator for Interpreter {
             field_values.insert(field_name.clone(), field_value);
         }
 
-        println!("oh it stack now: {:?}", self.stack);
         let obj_instance = ObjectInstance {
             ty: KindHash::clone(&obj_hash),
             contract_ty: None,
@@ -1426,7 +1399,6 @@ impl Evaluator for Interpreter {
         });
         let value = Value::Reference(reference);
         self.stack.push(value);
-        println!("oh it stack now: {:?}", self.stack);
     }
 
     fn visit_function_application(&mut self, func_app: &parse_tree::FunctionApplication) {
@@ -1649,16 +1621,13 @@ impl Evaluator for Interpreter {
                     }
                 }
 
-                println!("NEW_TYPE_ARGS: {:?}", new_type_args);
                 fs.write().unwrap().type_arguments = new_type_args;
             },
             _ => panic!("trying to apply types to something that cannot take type arguements"),
         }
 
         // we need to check if the equivalent type already exists
-        println!("NEW_TYPE: {:?}", new_type);
         let new_type_kind_hash = new_type.kind_hash(&self.kind_table, &self.heap);
-        println!("NEW_TYPE_KIND_HASH: {:?}", new_type_kind_hash);
         self.kind_table.create(&self.heap, new_type);
 
         let new_item = if let Some(ref mut func) = maybe_func {
@@ -1679,7 +1648,6 @@ impl Evaluator for Interpreter {
             Item::TypeReference(KindHash::clone(&new_type_kind_hash))
         };
 
-        println!("NEW ITEM: {:?}", new_item);
         
         let addr = self.heap.alloc();
         self.heap.store(addr, new_item);
@@ -1780,17 +1748,8 @@ impl Callable<Interpreter> for PelFunction {
         let mut func_app_local_env = Environment::from_parent(&self.environment);
         for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
             let address = param_kind_ref.to_heap_ref().unwrap().address;
-            println!("address... {:?}", address);
             let param_kind = interpreter.heap.load_type_reference(address).unwrap();
-            println!("param_kind: {:?}", param_kind);
-            println!("arg_ref: {:?}", arg_ref);
-
-            let param_kind = if let Some(type_param_name) = Interpreter::extract_type_param_name(&param_kind) {
-                let actual_param_ref = signature.read().unwrap().environment.read().unwrap().get_reference_by_name(&type_param_name).unwrap();
-                interpreter.heap.load_type_reference(actual_param_ref.to_heap_ref().unwrap().address).unwrap()
-            } else {
-                param_kind
-            };
+            let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
 
             if arg_ref.get_ty() != param_kind {
                 panic!("expected argument with type: {}, got: {}",

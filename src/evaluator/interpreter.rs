@@ -361,13 +361,6 @@ impl Interpreter {
         unimplemented!("how to load user module");
     }
 
-    fn extract_type_param_name(kind_hash: &KindHash) -> Option<String> {
-        let type_param_name_regex = regex::Regex::new(r"TypeVariable\{(\w+)\}").unwrap();
-        type_param_name_regex
-            .captures(kind_hash)
-            .map(|caps| caps[1].to_string())
-    }
-
     fn top_of_stack_reference(&self) -> StackReference {
         StackReference {
             ty: self.stack[self.stack.len() - 1].get_ty(),
@@ -841,7 +834,6 @@ impl Evaluator for Interpreter {
     fn visit_function_declaration(&mut self, func_decl: &parse_tree::FunctionDeclaration) {
         let name = &func_decl.signature.name;
 
-        println!("visiting function decl: {:?}", name);
         self.visit_function_signature(&func_decl.signature);
         let func_sig_ref = self.current_env
             .read()
@@ -854,7 +846,6 @@ impl Evaluator for Interpreter {
             .unwrap();
 
         let func_sig_kind_hash = self.heap.load_type_reference(func_sig_heap_ref.address).unwrap();
-        println!("func_sig_kind_hash: {:?}", func_sig_kind_hash);
         let func_sig = self.kind_table.load(&func_sig_kind_hash).unwrap().to_func_sig().unwrap();
 
         let func = Function::PelFunction(Arc::new(RwLock::new(PelFunction {
@@ -898,7 +889,6 @@ impl Evaluator for Interpreter {
         };
 
         let func_sig_kind_hash = func_sig.kind_hash(&self.kind_table, &self.heap);
-        println!("choco bananas: {:?}", func_sig_kind_hash);
         func_sig.type_arguments = self.generate_type_holes(&func_sig_kind_hash, &func_sig_syntax.type_parameters);
 
         let mut parameters = Vec::new();
@@ -1183,8 +1173,9 @@ impl Evaluator for Interpreter {
                             stack_ref = StackReference::clone(sr);
                         },
                         Value::Scalar(s) => {
-                            panic!("scalar cannot be accessed with field_access syntax");
+                            panic!("scalar: {:?} cannot be accessed with field_access syntax", s);
                         }
+                        _ => unimplemented!(),
                     }
                 }
             },
@@ -1350,8 +1341,6 @@ impl Evaluator for Interpreter {
         let mut field_values = HashMap::new();
         for (field_name, expected_ty_ref) in obj.read().unwrap().fields.iter() {
             let expected_ty = self.heap.load_type_reference(expected_ty_ref.to_heap_ref().unwrap().address).unwrap();
-            println!("\n\n item: {:?}", item);
-            println!("EXPECTED_TY: {:?}\n\n", expected_ty);
 
             let expected_ty = resolve_kind_hash(&expected_ty, &self.kind_table, &self.heap);
 
@@ -1514,22 +1503,41 @@ impl Evaluator for Interpreter {
                 o_readable
                     .type_arguments
                     .iter()
+                    .map(|name_to_kind_hash| {
+                        (String::clone(&name_to_kind_hash.0), KindHash::clone(&name_to_kind_hash.1))
+                    })
+                    .collect::<Vec<(String, KindHash)>>()
+                    .into_iter()
                     .zip(types.into_iter())
+                    .collect::<Vec<((String, KindHash), Reference)>>()
             },
             Kind::Enum(ref e_arc) => {
                 let e_readable = e_arc.read().unwrap();
                 e_readable
                     .type_arguments
                     .iter()
+                    .map(|name_to_kind_hash| {
+                        (String::clone(&name_to_kind_hash.0), KindHash::clone(&name_to_kind_hash.1))
+                    })
+                    .collect::<Vec<(String, KindHash)>>()
+                    .into_iter()
                     .zip(types.into_iter())
+                    .collect::<Vec<((String, KindHash), Reference)>>()
             },
             Kind::FunctionSignature(ref fs_arc) => {
                 let fs_readable = fs_arc.read().unwrap();
                 fs_readable
                     .type_arguments
                     .iter()
+                    .map(|name_to_kind_hash| {
+                        (String::clone(&name_to_kind_hash.0), KindHash::clone(&name_to_kind_hash.1))
+                    })
+                    .collect::<Vec<(String, KindHash)>>()
+                    .into_iter()
                     .zip(types.into_iter())
+                    .collect::<Vec<((String, KindHash), Reference)>>()
             },
+            _ => unimplemented!(),
         };
 
         let mut environment = Environment::root();
@@ -1564,9 +1572,9 @@ impl Evaluator for Interpreter {
             },
             Kind::FunctionSignature(ref fs_arc) => {
                 let instance = PelFunction {
-                    parent: TODO,
+                    parent: KindHash::clone(&self.current_module),
                     signature: to_apply_to.kind_hash(&self.kind_table, &self.heap),
-                    body: ,
+                    body: parse_tree::BlockBody { statements: Vec::new() },
                     is_type_complete: true,
                     environment: Arc::new(RwLock::new(environment)),
                 };
@@ -1656,6 +1664,10 @@ impl Callable<Interpreter> for Function {
 
 impl Callable<Interpreter> for PelFunction {
     fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+        if !self.is_type_complete {
+            panic!("trying to call method on generic method without applying tyes first");
+        }
+
         let signature = interpreter.kind_table
             .load(&self.signature)
             .unwrap()
@@ -1676,7 +1688,8 @@ impl Callable<Interpreter> for PelFunction {
         for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
             let address = param_kind_ref.to_heap_ref().unwrap().address;
             let param_kind = interpreter.heap.load_type_reference(address).unwrap();
-            let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
+            // let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
+            let param_kind = self.resolve_kind(param_kind, &interpreter.heap);
 
             if arg_ref.get_ty() != param_kind {
                 panic!("expected argument with type: {}, got: {}",

@@ -1081,6 +1081,26 @@ pub(crate) struct PelFunction {
     pub environment: Arc<RwLock<Environment>>,
 }
 
+fn extract_type_variable_name(kind_hash: &KindHash) -> Option<String> {
+    // TODO -> get rid of regex but im lazy
+    let type_param_name_regex = regex::Regex::new(r".*\{(\w+)\}").unwrap();
+    type_param_name_regex
+        .captures(kind_hash)
+        .map(|caps| caps[1].to_string())
+}
+
+impl PelFunction {
+    pub fn resolve_kind(&self, kind_to_resolve: KindHash, heap: &Heap) -> KindHash {
+        if let Some(param_name) = extract_type_variable_name(&kind_to_resolve) {
+            let type_ref = self.environment.read().unwrap().get_reference_by_name(&param_name).unwrap();
+            let type_heap_ref = type_ref.to_heap_ref().unwrap();
+            heap.load_type_reference(type_heap_ref.address).unwrap()
+        } else {
+            kind_to_resolve
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct NativeFunction {
     pub name: String,

@@ -104,9 +104,9 @@ impl Reference {
         })
     }
 
-    pub fn create_function(function: Function, kind_table: &KindTable, heap: &mut Heap) -> Self {
-        let func_ty = function.signature();
-        let func = Item::Function(function);
+    pub fn create_function_invocation(function_invocation: FunctionInvocation, kind_table: &KindTable, heap: &mut Heap) -> Self {
+        let func_ty = function_invocation.signature();
+        let func = Item::Function(function_invocation);
         let addr = heap.alloc();
         heap.store(addr, func);
         
@@ -164,7 +164,7 @@ pub(crate) enum Item {
     ArrayInstance(Arc<RwLock<ArrayInstance>>),
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
-    Function(Function),
+    FunctionInvocation(FunctionInvocation),
     ModuleReference(KindHash),
     TypeReference(KindHash),
 }
@@ -184,9 +184,9 @@ impl Item {
         }
     }
 
-    pub fn to_function(&self) -> Option<Function> {
+    pub fn to_function_invocation(&self) -> Option<FunctionInvocation> {
         match self {
-            Item::Function(func) => Some(Function::clone(func)),
+            Item::FunctionInvocation(func) => Some(FunctionInvocation::clone(func)),
             _ => None,
         }
     }
@@ -211,12 +211,12 @@ impl Clone for Item {
         use Item::*;
 
         match self {
-            ArrayInstance(ref arr_arc)   => ArrayInstance(Arc::clone(arr_arc)),
-            ObjectInstance(ref oi_arc)   => ObjectInstance(Arc::clone(oi_arc)),
-            EnumInstance(ref ei_arc)     => EnumInstance(Arc::clone(ei_arc)),
-            Function(ref func)           => Function(func.clone()),
-            ModuleReference(ref kh)      => ModuleReference(KindHash::clone(kh)),
-            TypeReference(ref kh)        => TypeReference(KindHash::clone(kh)),
+            ArrayInstance(ref arr_arc)         => ArrayInstance(Arc::clone(arr_arc)),
+            ObjectInstance(ref oi_arc)         => ObjectInstance(Arc::clone(oi_arc)),
+            EnumInstance(ref ei_arc)           => EnumInstance(Arc::clone(ei_arc)),
+            FunctionInvocation(ref func_invoc) => FunctionInvocation(func_invoc.clone()),
+            ModuleReference(ref kh)            => ModuleReference(KindHash::clone(kh)),
+            TypeReference(ref kh)              => TypeReference(KindHash::clone(kh)),
             _ => unimplemented!("oh no"),
         }
     }
@@ -945,11 +945,18 @@ pub(crate) struct EnumInstance {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) enum Runnable {
+    PelFunction(BlockBody),
+    NativeFunction(fn(&mut Interpreter, Vec<Reference>) -> Option<Reference>),
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct FunctionSignature {
     pub parent: KindHash,
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
     pub parameters: Vec<(String, Reference)>, // name of parameter and a reference to the type it contains
+    pub body: Runnable,
     pub returns: Option<Reference>,
 }
 
@@ -1043,40 +1050,9 @@ impl KindHashable for FunctionSignature {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum Function {
-    PelFunction(Arc<RwLock<PelFunction>>),
-    NativeFunction(Arc<RwLock<NativeFunction>>),
-}
-
-impl Function {
-    pub fn to_pel_function(&self) -> Option<Arc<RwLock<PelFunction>>> {
-        match self {
-            Function::PelFunction(pf_arc) => Some(Arc::clone(pf_arc)),
-            _ => None
-        }
-    }
-
-    pub fn to_native_function(&self) -> Option<Arc<RwLock<NativeFunction>>> {
-        match self {
-            Function::NativeFunction(nat_arc) => Some(Arc::clone(nat_arc)),
-            _ => None
-        }
-    }
-
-    pub fn signature(&self) -> KindHash {
-        match self {
-            Function::PelFunction(pf) => KindHash::clone(&pf.read().unwrap().signature),
-            Function::NativeFunction(nf) => KindHash::clone(&nf.read().unwrap().signature),
-            _ => unimplemented!("unknown function type: {:?}", self),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct PelFunction {
+pub(crate) struct FunctionInvocation {
     pub parent: KindHash,
     pub signature: KindHash,
-    pub body: BlockBody,
     pub is_type_complete: bool,
     pub environment: Arc<RwLock<Environment>>,
 }
@@ -1089,7 +1065,7 @@ fn extract_type_variable_name(kind_hash: &KindHash) -> Option<String> {
         .map(|caps| caps[1].to_string())
 }
 
-impl PelFunction {
+impl FunctionInvocation {
     pub fn resolve_kind(&self, kind_to_resolve: KindHash, heap: &Heap) -> KindHash {
         if let Some(param_name) = extract_type_variable_name(&kind_to_resolve) {
             let type_ref = self.environment.read().unwrap().get_reference_by_name(&param_name).unwrap();
@@ -1099,23 +1075,6 @@ impl PelFunction {
             kind_to_resolve
         }
     }
-}
-
-#[derive(Clone)]
-pub(crate) struct NativeFunction {
-    pub name: String,
-    pub signature: KindHash,
-    pub func: fn(&mut Interpreter, Vec<Reference>) -> Option<Reference>,
-}
-
-impl std::fmt::Debug for NativeFunction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<NativeFunction-{}>", self.name)
-    }
-}
-
-pub(crate) trait Callable<E: Evaluator> {
-    fn call(&self, evaluator: &mut E, args: Vec<Reference>) -> Option<Reference>;
 }
 
 // pub(crate) trait Appliable<E: Evaluator> {
@@ -1135,7 +1094,7 @@ pub(crate) trait Evaluator {
     fn visit_variant_declaration(&mut self, variant_decl: &VariantDeclaration);
     fn visit_function_declaration(&mut self, function_decl: &FunctionDeclaration);
     fn visit_use_declaration(&mut self, use_decl: &UseDeclaration);
-    fn visit_function_signature(&mut self, function_decl: &crate::syntax::parse_tree::FunctionSignature);
+    fn visit_function_signature(&mut self, function_sig: &crate::syntax::parse_tree::FunctionSignature, function_body: &crate::syntax::parse_tree::BlockBody);
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &TypedVariableDeclaration);
     fn visit_block_body(&mut self, block_body: &BlockBody);
     fn visit_statement(&mut self, statment: &Statement);

@@ -9,13 +9,12 @@ use crate::evaluator::evaluator::{
     Address,
     Array,
     ArrayInstance,
-    Callable,
     Contract,
     Enum,
     EnumInstance,
     Environment,
     Evaluator,
-    Function,
+    FunctionInvocation,
     FunctionSignature,
     Heap,
     HeapReference,
@@ -26,11 +25,10 @@ use crate::evaluator::evaluator::{
     KindHashable,
     KIND_KIND_HASH_STR,
     Module,
-    NativeFunction,
     Object,
     ObjectInstance,
-    PelFunction,
     Reference,
+    Runnable,
     Scalar,
     StackReference,
     Value,
@@ -527,6 +525,7 @@ impl Evaluator for Interpreter {
                         name: String::clone(&vd.name),
                         type_arguments: Vec::new(),
                         parameters: vec![/*(String, KindHash*/],
+                        body: Runnable::NativeFunction(enum_constructor),
                         returns: Some(return_ty_ref),
                     };
                     let nat_func_ty = nat_func_sig.kind_hash(&self.kind_table, &self.heap);
@@ -834,7 +833,7 @@ impl Evaluator for Interpreter {
     fn visit_function_declaration(&mut self, func_decl: &parse_tree::FunctionDeclaration) {
         let name = &func_decl.signature.name;
 
-        self.visit_function_signature(&func_decl.signature);
+        self.visit_function_signature(&func_decl.signature, &func_decl.body);
         let func_sig_ref = self.current_env
             .read()
             .unwrap()
@@ -854,7 +853,6 @@ impl Evaluator for Interpreter {
             // not this method explicitly
             parent: KindHash::clone(&self.current_module),
             signature: KindHash::clone(&func_sig_kind_hash),
-            body: func_decl.body.clone(),
             is_type_complete: func_sig.read().unwrap().type_arguments.is_empty(),
             environment: Arc::clone(&self.current_env),
         })));
@@ -876,7 +874,7 @@ impl Evaluator for Interpreter {
             .define(name.clone(), func_ref);
     }
 
-    fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature) {
+    fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature, func_body: &parse_tree::BlockBody) {
         let local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
@@ -992,6 +990,7 @@ impl Evaluator for Interpreter {
 
     fn visit_return(&mut self, return_stmt: &parse_tree::Return) {
         self.visit_expression(&return_stmt.value);
+        println!("visited return node and stack is: {:?}", self.stack);
         self.exiting = true;
     }
 
@@ -1148,11 +1147,12 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_field_access(&mut self, field_access: &parse_tree::FieldAccess) {
+        println!("visiting field access and stack is: {:?}", self.stack);
         let to_access_value = self.stack.pop().unwrap();
         let reference = match to_access_value {
             Value::Reference(r) => r,
             Value::Scalar(_) => {
-                let message = format!("trying to use field access syntax on a scalar or stack allocated value");
+                let message = format!("trying to use field access syntax on a scalar");
                 panic!(message);
             },
             _ => unimplemented!("unknown value type in visit_field_access"),
@@ -1173,6 +1173,7 @@ impl Evaluator for Interpreter {
                             stack_ref = StackReference::clone(sr);
                         },
                         Value::Scalar(s) => {
+                            println!("field_access: {:?}", field_access);
                             panic!("scalar: {:?} cannot be accessed with field_access syntax", s);
                         }
                         _ => unimplemented!(),
@@ -1182,6 +1183,7 @@ impl Evaluator for Interpreter {
             Reference::HeapReference(hr) => {
                 heap_ref = Some(hr);
             }
+            _ => unimplemented!("unknown value type in visit_field_access"),
         }
 
         let heap_ref = heap_ref.unwrap();
@@ -1446,13 +1448,9 @@ impl Evaluator for Interpreter {
         let mut maybe_func = None;
 
         let type_ref = match item {
-            Item::Function(Function::PelFunction(pf)) => {
-                maybe_func = Some(Function::PelFunction(Arc::clone(&pf)));
-                KindHash::clone(&pf.read().unwrap().signature)
-            },
-            Item::Function(Function::NativeFunction(nf)) => {
-                maybe_func = Some(Function::NativeFunction(Arc::clone(&nf)));
-                KindHash::clone(&nf.read().unwrap().signature)
+            Item::FunctionInvocation(func_invoc) => {
+                maybe_func = Some(Arc::clone(&pf));
+                KindHash::clone(&func_invoc.read().unwrap().signature)
             },
             Item::TypeReference(kh) => {
                 KindHash::clone(&kh)
@@ -1571,15 +1569,15 @@ impl Evaluator for Interpreter {
                 Item::EnumInstance(Arc::new(RwLock::new(instance)))
             },
             Kind::FunctionSignature(ref fs_arc) => {
-                let instance = PelFunction {
+                let instance = FunctionInvocation
+                {
                     parent: KindHash::clone(&self.current_module),
                     signature: to_apply_to.kind_hash(&self.kind_table, &self.heap),
-                    body: parse_tree::BlockBody { statements: Vec::new() },
                     is_type_complete: true,
                     environment: Arc::new(RwLock::new(environment)),
                 };
 
-                Item::Function(Function::PelFunction(Arc::new(RwLock::new(instance))))
+                Item::FunctionInvocation(FunctionInvocation::PelFunction(Arc::new(RwLock::new(instance))))
             },
             _ => unreachable!(),
         };
@@ -1641,184 +1639,57 @@ impl Evaluator for Interpreter {
     }
 }
 
-impl Callable<Interpreter> for Object {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
-        panic!("unimplemented");
-    }
-}
-
-impl Callable<Interpreter> for Enum {
-    fn call(&self, _interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
-        panic!("unimplemented");
-    }
-}
-
-impl Callable<Interpreter> for Function {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
-        match self {
-            Function::NativeFunction(nf_arc) => nf_arc.read().unwrap().call(interpreter, args),
-            Function::PelFunction(pf_arc)    => pf_arc.read().unwrap().call(interpreter, args),
-        }
-    }
-}
-
-impl Callable<Interpreter> for PelFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
-        if !self.is_type_complete {
-            panic!("trying to call method on generic method without applying tyes first");
-        }
-
-        let signature = interpreter.kind_table
-            .load(&self.signature)
-            .unwrap()
-            .to_func_sig()
-            .unwrap();
-        
-        if signature.read().unwrap().parameters.len() != args.len() {
-            let message = format!(
-                "invalid number of parameters in application of function: {}. expected {}, got {}",
-                self.signature,
-                signature.read().unwrap().parameters.len(),
-                args.len()
-            );
-            panic!(message);
-        }
-
-        let mut func_app_local_env = Environment::from_parent(&self.environment);
-        for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
-            let address = param_kind_ref.to_heap_ref().unwrap().address;
-            let param_kind = interpreter.heap.load_type_reference(address).unwrap();
-            // let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
-            let param_kind = self.resolve_kind(param_kind, &interpreter.heap);
-
-            if arg_ref.get_ty() != param_kind {
-                panic!("expected argument with type: {}, got: {}",
-                       param_kind,
-                       arg_ref.get_ty());
-            }
-
-            func_app_local_env.define(n.clone(), Reference::clone(&arg_ref));
-        }
-
-        let current_env = Arc::clone(&interpreter.current_env);
-        interpreter.set_current_env(func_app_local_env);
-        interpreter.visit_block_body(&self.body);
-        interpreter.current_env = current_env;
-       
-        let sig_readable = signature.read().unwrap();
-        if let Some(ref _type_sym) = sig_readable.returns {
-            // TODO -> type check return based on the expected `type_sym`
-            Some(Reference::StackReference(interpreter.top_of_stack_reference()))
-        } else {
-            None
-        }
-    }
-}
-
-impl Callable<Interpreter> for NativeFunction {
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
-        (self.func)(interpreter, args)
-    }
-}
-
-// impl Appliable<Interpreter> for Object {
-//     fn apply(&self) -> ?? {
-//         let mut new_type_args = Vec::new();
-//         let mut new_fields = HashMap::new();
-//         
-//         {
-//             let o_readable = o.read().unwrap();
-//             
-//             let zipped_type_args_with_applied_type = o_readable
-//                 .type_arguments
-//                 .iter()
-//                 .zip(types.into_iter());
-// 
-//             for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
-//                 new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
-// 
-//                 for (field_name, field_kind_hash) in o.read().unwrap().fields.iter() {
-//                     if field_kind_hash == type_hole_kind_hash {
-//                         new_fields.insert(field_name.clone(), KindHash::clone(type_to_apply));
-//                     }
-//                 }
-//             }
+// impl Callable<Interpreter> for PelFunction {
+//     fn call(&self, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+//         println!("calling function: {:?}", self);
+//         if !self.is_type_complete {
+//             panic!("trying to call method on generic method without applying tyes first");
 //         }
 // 
-//         // TODO -> methods are not covered
+//         let signature = interpreter.kind_table
+//             .load(&self.signature)
+//             .unwrap()
+//             .to_func_sig()
+//             .unwrap();
+//         
+//         if signature.read().unwrap().parameters.len() != args.len() {
+//             let message = format!(
+//                 "invalid number of parameters in application of function: {}. expected {}, got {}",
+//                 self.signature,
+//                 signature.read().unwrap().parameters.len(),
+//                 args.len()
+//             );
+//             panic!(message);
+//         }
 // 
-//         o.write().unwrap().type_arguments = new_type_args;
-//         o.write().unwrap().fields = new_fields;
+//         let mut func_app_local_env = Environment::from_parent(&self.environment);
+//         for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
+//             let address = param_kind_ref.to_heap_ref().unwrap().address;
+//             let param_kind = interpreter.heap.load_type_reference(address).unwrap();
+//             // let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
+//             let param_kind = self.resolve_kind(param_kind, &interpreter.heap);
+// 
+//             if arg_ref.get_ty() != param_kind {
+//                 panic!("expected argument with type: {}, got: {}",
+//                        param_kind,
+//                        arg_ref.get_ty());
+//             }
+// 
+//             func_app_local_env.define(n.clone(), Reference::clone(&arg_ref));
+//         }
+// 
+//         let current_env = Arc::clone(&interpreter.current_env);
+//         interpreter.set_current_env(func_app_local_env);
+//         interpreter.visit_block_body(&signature.read().unwrap().body);
+//         interpreter.current_env = current_env;
+//        
+//         let sig_readable = signature.read().unwrap();
+//         if let Some(ref _type_sym) = sig_readable.returns {
+//             // TODO -> type check return based on the expected `type_sym`
+//             Some(Reference::StackReference(interpreter.top_of_stack_reference()))
+//         } else {
+//             None
+//         }
 //     }
 // }
 
-// impl Appliable<Interpreter> for Enum {
-//     fn apply(&self) -> ?? {
-//         // TODO -> this is copied and pasted from above. need to find where to put this logic
-//         let mut new_type_args = Vec::new();
-//         let mut new_variants = HashMap::new();
-//         
-//         {
-//             let e_readable = e.read().unwrap();
-// 
-//             let zipped_type_args_with_applied_type = e_readable
-//                 .type_arguments
-//                 .iter()
-//                 .zip(types.into_iter());
-// 
-//             for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
-//                 new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
-// 
-//                 for (variant_name, maybe_variant_kind_hash) in e.read().unwrap().variant_tys.iter() {
-//                     if let Some(variant_kind_hash) = maybe_variant_kind_hash {
-//                         if variant_kind_hash == type_hole_kind_hash {
-//                             new_variants.insert(variant_name.clone(), Some(KindHash::clone(type_to_apply)));
-//                         }
-//                     } else {
-//                         new_variants.insert(variant_name.clone(), None);
-//                     }
-//                 }
-//             }
-//         }
-//         
-//         // TODO -> methods are not covered
-// 
-//         e.write().unwrap().type_arguments = new_type_args;
-//         e.write().unwrap().variant_tys = new_variants;
-//     }
-// }
-
-// impl Appliable<Interpreter> for FunctionSignature {
-//     fn apply(&self) -> ?? {
-//         let mut new_type_args = Vec::new();
-//         let mut new_parameters = Vec::new();
-// 
-//         {
-//             let fs_readable = fs.read().unwrap();
-// 
-//             let zipped_type_args_with_applied_type = fs_readable
-//                 .type_arguments
-//                 .iter()
-//                 .zip(types.into_iter());
-// 
-//             for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply) in zipped_type_args_with_applied_type {
-//                 new_type_args.push((String::clone(type_name), KindHash::clone(type_to_apply)));
-// 
-//                 for (param_name, param_kind_hash) in fs.read().unwrap().parameters.iter() {
-//                     if param_kind_hash == type_hole_kind_hash {
-//                         new_parameters.push((param_name.clone(), KindHash::clone(type_to_apply)));
-//                     }
-//                 }
-// 
-//                 if let Some(kh) = fs_readable.returns {
-// 
-//                 }
-//             }
-//         }
-// 
-//         println!("NEW_TYPE_ARGS: {:?}", new_type_args);
-//         println!("NEW_PARAMETERS: {:?}", new_parameters);
-//         fs.write().unwrap().type_arguments = new_type_args;
-//         fs.write().unwrap().parameters = new_parameters;
-//     }
-// }

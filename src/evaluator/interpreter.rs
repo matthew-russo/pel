@@ -525,25 +525,12 @@ impl Evaluator for Interpreter {
                         name: String::clone(&vd.name),
                         type_arguments: Vec::new(),
                         parameters: vec![/*(String, KindHash*/],
-                        body: Runnable::NativeFunction(enum_constructor),
+                        body: Some(Runnable::NativeFunction(enum_constructor)),
                         returns: Some(return_ty_ref),
                     };
                     let nat_func_ty = nat_func_sig.kind_hash(&self.kind_table, &self.heap);
-                    let nat_func = Function::NativeFunction(Arc::new(RwLock::new(NativeFunction {
-                        name: "".into(),
-                        signature: KindHash::clone(&nat_func_ty),
-                        func: enum_constructor,
-                    })));
-
-                    let addr = self.heap.alloc();
-                    self.heap.store(addr, Item::Function(nat_func));
-                    
-                    (vd.name.clone(), Reference::HeapReference(HeapReference {
-                        ty: nat_func_ty,
-                        is_self: false,
-                        address: addr,
-                        size: std::u32::MAX,
-                    }))
+                    let type_ref = Reference::create_type_reference(&nat_func_ty, &mut self.heap);
+                    (vd.name.clone(), type_ref)
                 }
             })
             .collect();
@@ -769,14 +756,14 @@ impl Evaluator for Interpreter {
 
             let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap();
             let implementor_func_heap_ref = implementor_func_ref.to_heap_ref().unwrap();
-            let implementor_func = self.heap.load(implementor_func_heap_ref.address).to_function().unwrap();
-            let implementor_sig = self.kind_table.load(&implementor_func.to_pel_function().unwrap().read().unwrap().signature).unwrap().to_func_sig().unwrap();
+            let implementor_func = self.heap.load(implementor_func_heap_ref.address).to_function_invocation().unwrap();
+            let implementor_sig = self.kind_table.load(&implementor_func.read().unwrap().signature).unwrap().to_func_sig().unwrap();
 
             if !req_sig.read().unwrap().is_compatible_with(implementor_sig.read().unwrap().deref(), &self.kind_table, &self.heap) {
                 let message = format!("Function with name: {} has signature: {} but expected: {}",
                                       req_name,
                                       req_sig.read().unwrap().kind_hash(&self.kind_table, &self.heap),
-                                      implementor_func.to_pel_function().unwrap().read().unwrap().signature);
+                                      implementor_func.read().unwrap().signature);
                 panic!(message);
             }
         }
@@ -830,10 +817,14 @@ impl Evaluator for Interpreter {
         self.current_env.write().unwrap().copy_from(mod_env.read().unwrap().deref());
     }
 
+
+    // TODO -> need a concept of a function handle which is only based on its inputs and
+    // outputs and not the name, context that its in. This is for lambdas, functions as
+    // values, and checking whether functions satisfy parameter/return constraints
     fn visit_function_declaration(&mut self, func_decl: &parse_tree::FunctionDeclaration) {
         let name = &func_decl.signature.name;
 
-        self.visit_function_signature(&func_decl.signature, &func_decl.body);
+        self.visit_function_signature(&func_decl.signature);
         let func_sig_ref = self.current_env
             .read()
             .unwrap()
@@ -847,34 +838,10 @@ impl Evaluator for Interpreter {
         let func_sig_kind_hash = self.heap.load_type_reference(func_sig_heap_ref.address).unwrap();
         let func_sig = self.kind_table.load(&func_sig_kind_hash).unwrap().to_func_sig().unwrap();
 
-        let func = Function::PelFunction(Arc::new(RwLock::new(PelFunction {
-            // TODO -> this should be aware of whether its in a module or an object/enum/contract
-            // TODO -> this would be changing what calls this function to set the current module,
-            // not this method explicitly
-            parent: KindHash::clone(&self.current_module),
-            signature: KindHash::clone(&func_sig_kind_hash),
-            is_type_complete: func_sig.read().unwrap().type_arguments.is_empty(),
-            environment: Arc::clone(&self.current_env),
-        })));
-
-        let addr = self.heap.alloc();
-        self.heap.store(addr, Item::Function(func));
-        let func_ref = Reference::HeapReference(HeapReference {
-            // TODO -> need a concept of a function handle which is only based on its inputs and
-            // outputs and not the name, context that its in. This is for lambdas, functions as
-            // values, and checking whether functions satisfy parameter/return constraints
-            ty: func_sig_kind_hash,
-            is_self: false,
-            address: addr,
-            size: std::u32::MAX,
-        });
-        self.current_env
-            .write()
-            .unwrap()
-            .define(name.clone(), func_ref);
+        func_sig.write().unwrap().body = Some(Runnable::PelFunction(parse_tree::BlockBody::clone(&func_decl.body)));
     }
 
-    fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature, func_body: &parse_tree::BlockBody) {
+    fn visit_function_signature(&mut self, func_sig_syntax: &parse_tree::FunctionSignature) {
         let local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
@@ -883,6 +850,7 @@ impl Evaluator for Interpreter {
             name: func_sig_syntax.name.clone(),
             type_arguments: Vec::new(),
             parameters: Vec::new(),
+            body: None,
             returns: None,
         };
 
@@ -1280,7 +1248,7 @@ impl Evaluator for Interpreter {
                                     let new_item = Item::EnumInstance(Arc::new(RwLock::new(new_instance)));
                                     self.heap.store(addr, new_item);
                                 },
-                                Item::Function(ref func) => {
+                                Item::FunctionInvocation(ref func) => {
                                     self.stack.push(Value::clone(&to_access_value));
                                     let var_name = pel_utils::rust_string_to_pel_string(&mod_access.name, &mut self.heap);
                                     self.stack.push(Value::Reference(var_name));
@@ -1405,7 +1373,7 @@ impl Evaluator for Interpreter {
 
         let to_apply_to_item = self.heap.load(reference.address);
 
-        let func = match to_apply_to_item.to_function() {
+        let func = match to_apply_to_item.to_function_invocation() {
             Some(f) => f,
             None => {
                 let message = format!("trying to call something that isn't a function: {:?}", to_apply_to_item);
@@ -1414,7 +1382,7 @@ impl Evaluator for Interpreter {
         };
 
         let mut args: VecDeque<Reference> = VecDeque::new();
-        let sig = self.kind_table.load(&func.signature()).unwrap().to_func_sig().unwrap();
+        let sig = self.kind_table.load(&func.read().unwrap().signature).unwrap().to_func_sig().unwrap();
         if let Some((param_name, param_type)) = sig.read().unwrap().parameters.get(0) {
             if SELF_VAR_SYMBOL_NAME == param_name {
                 args.push_back(Reference::StackReference(self.top_of_stack_reference()));
@@ -1430,9 +1398,9 @@ impl Evaluator for Interpreter {
         
         // TODO -> type_check args?
         
-        let result = func.call(self, args.into_iter().collect());
+        let result = call(func.read().unwrap().deref(), self, args.into_iter().collect());
 
-        let func_sig = self.kind_table.load(&func.signature()).unwrap().to_func_sig().unwrap();
+        let func_sig = self.kind_table.load(&func.read().unwrap().signature).unwrap().to_func_sig().unwrap();
         let func_sig_readable = func_sig.read().unwrap();
         if let Some(ref _ret) = func_sig_readable.returns {
             // TODO -> type check
@@ -1449,7 +1417,7 @@ impl Evaluator for Interpreter {
 
         let type_ref = match item {
             Item::FunctionInvocation(func_invoc) => {
-                maybe_func = Some(Arc::clone(&pf));
+                maybe_func = Some(Arc::clone(&func_invoc));
                 KindHash::clone(&func_invoc.read().unwrap().signature)
             },
             Item::TypeReference(kh) => {
@@ -1577,7 +1545,7 @@ impl Evaluator for Interpreter {
                     environment: Arc::new(RwLock::new(environment)),
                 };
 
-                Item::FunctionInvocation(FunctionInvocation::PelFunction(Arc::new(RwLock::new(instance))))
+                Item::FunctionInvocation(Arc::new(RwLock::new(instance)))
             },
             _ => unreachable!(),
         };
@@ -1636,6 +1604,67 @@ impl Evaluator for Interpreter {
             size: std::u32::MAX,
         });
         self.stack.push(Value::Reference(stack_ref));
+    }
+}
+
+fn call(func_invoc: &FunctionInvocation, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
+    println!("calling function: {:?}", func_invoc);
+    if !func_invoc.is_type_complete {
+        panic!("trying to call method on generic method without applying tyes first");
+    }
+
+    let signature = interpreter.kind_table
+        .load(&func_invoc.signature)
+        .unwrap()
+        .to_func_sig()
+        .unwrap();
+
+    let sig_readable = signature.read().unwrap();
+    match &sig_readable.body {
+        None => panic!("trying to call function with no body"),
+        Some(Runnable::NativeFunction(func)) => {
+            (func)(interpreter, args)
+        },
+        Some(Runnable::PelFunction(block_body)) => {
+            if signature.read().unwrap().parameters.len() != args.len() {
+                let message = format!(
+                    "invalid number of parameters in application of function: {}. expected {}, got {}",
+                    func_invoc.signature,
+                    signature.read().unwrap().parameters.len(),
+                    args.len()
+                );
+                panic!(message);
+            }
+
+            let mut func_app_local_env = Environment::from_parent(&func_invoc.environment);
+            for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
+                let address = param_kind_ref.to_heap_ref().unwrap().address;
+                let param_kind = interpreter.heap.load_type_reference(address).unwrap();
+                // let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
+                let param_kind = func_invoc.resolve_kind(param_kind, &interpreter.heap);
+
+                if arg_ref.get_ty() != param_kind {
+                    panic!("expected argument with type: {}, got: {}",
+                           param_kind,
+                           arg_ref.get_ty());
+                }
+
+                func_app_local_env.define(n.clone(), Reference::clone(&arg_ref));
+            }
+
+            let current_env = Arc::clone(&interpreter.current_env);
+            interpreter.set_current_env(func_app_local_env);
+            interpreter.visit_block_body(&block_body);
+            interpreter.current_env = current_env;
+            
+            let sig_readable = signature.read().unwrap();
+            if let Some(ref _type_sym) = sig_readable.returns {
+                // TODO -> type check return based on the expected `type_sym`
+                Some(Reference::StackReference(interpreter.top_of_stack_reference()))
+            } else {
+                None
+            }
+        },
     }
 }
 

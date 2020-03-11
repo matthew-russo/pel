@@ -105,8 +105,8 @@ impl Reference {
     }
 
     pub fn create_function_invocation(function_invocation: FunctionInvocation, kind_table: &KindTable, heap: &mut Heap) -> Self {
-        let func_ty = function_invocation.signature();
-        let func = Item::Function(function_invocation);
+        let func_ty = KindHash::clone(&function_invocation.signature);
+        let func = Item::FunctionInvocation(Arc::new(RwLock::new(function_invocation)));
         let addr = heap.alloc();
         heap.store(addr, func);
         
@@ -164,7 +164,7 @@ pub(crate) enum Item {
     ArrayInstance(Arc<RwLock<ArrayInstance>>),
     ObjectInstance(Arc<RwLock<ObjectInstance>>),
     EnumInstance(Arc<RwLock<EnumInstance>>),
-    FunctionInvocation(FunctionInvocation),
+    FunctionInvocation(Arc<RwLock<FunctionInvocation>>),
     ModuleReference(KindHash),
     TypeReference(KindHash),
 }
@@ -184,9 +184,9 @@ impl Item {
         }
     }
 
-    pub fn to_function_invocation(&self) -> Option<FunctionInvocation> {
+    pub fn to_function_invocation(&self) -> Option<Arc<RwLock<FunctionInvocation>>> {
         match self {
-            Item::FunctionInvocation(func) => Some(FunctionInvocation::clone(func)),
+            Item::FunctionInvocation(func) => Some(Arc::clone(func)),
             _ => None,
         }
     }
@@ -944,10 +944,23 @@ pub(crate) struct EnumInstance {
     pub variant: (String, Option<Reference>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) enum Runnable {
     PelFunction(BlockBody),
     NativeFunction(fn(&mut Interpreter, Vec<Reference>) -> Option<Reference>),
+}
+
+impl std::fmt::Debug for Runnable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Runnable::PelFunction(bb) => {
+                write!(f, "PelFunction {{ block_body: {:?} }}", bb)
+            },
+            Runnable::NativeFunction(_) => {
+                write!(f, "NativeFunction")
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -956,7 +969,7 @@ pub(crate) struct FunctionSignature {
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
     pub parameters: Vec<(String, Reference)>, // name of parameter and a reference to the type it contains
-    pub body: Runnable,
+    pub body: Option<Runnable>,
     pub returns: Option<Reference>,
 }
 
@@ -1094,7 +1107,7 @@ pub(crate) trait Evaluator {
     fn visit_variant_declaration(&mut self, variant_decl: &VariantDeclaration);
     fn visit_function_declaration(&mut self, function_decl: &FunctionDeclaration);
     fn visit_use_declaration(&mut self, use_decl: &UseDeclaration);
-    fn visit_function_signature(&mut self, function_sig: &crate::syntax::parse_tree::FunctionSignature, function_body: &crate::syntax::parse_tree::BlockBody);
+    fn visit_function_signature(&mut self, function_sig: &crate::syntax::parse_tree::FunctionSignature);
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &TypedVariableDeclaration);
     fn visit_block_body(&mut self, block_body: &BlockBody);
     fn visit_statement(&mut self, statment: &Statement);

@@ -1371,14 +1371,26 @@ impl Evaluator for Interpreter {
             }
         };
 
-        let to_apply_to_item = self.heap.load(reference.address);
-
-        let func = match to_apply_to_item.to_function_invocation() {
-            Some(f) => f,
-            None => {
-                let message = format!("trying to call something that isn't a function: {:?}", to_apply_to_item);
-                panic!(message);
-            }
+        let mut to_apply_to_item = self.heap.load(reference.address);
+        
+        let func = match &to_apply_to_item {
+            Item::FunctionInvocation(fi) => Arc::clone(fi),
+            Item::TypeReference(type_ref) => {
+                let kind = self.kind_table.load(type_ref).unwrap();
+                if let Some(func_sig_arc) = kind.to_func_sig() {
+                    Arc::new(RwLock::new(FunctionInvocation {
+                        parent: KindHash::clone(&func_sig_arc.read().unwrap().parent),
+                        signature: func_sig_arc.read().unwrap().kind_hash(&self.kind_table, &self.heap),
+                        is_type_complete: func_sig_arc.read().unwrap().type_arguments.is_empty(),
+                        environment: Arc::new(RwLock::new(Environment::from_parent(&self.current_env))),
+                    }))
+                } else {
+                    panic!("trying to call something that isn't a function: {:?}", to_apply_to_item);
+                }
+            },
+            i => {
+                panic!("trying to call something that isn't a function: {:?}", i);
+            },
         };
 
         let mut args: VecDeque<Reference> = VecDeque::new();

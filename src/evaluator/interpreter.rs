@@ -973,6 +973,8 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_chainable_expression(&mut self, chainable_expr: &parse_tree::ChainableExpression) {
+        println!("visit_chainable_expression: {:?}", chainable_expr);
+
         use parse_tree::ExpressionChain::*;
         use parse_tree::ExpressionStart::*;
 
@@ -990,6 +992,7 @@ impl Evaluator for Interpreter {
                 let var_ref = match self.current_env.read().unwrap().get_reference_by_name(&name) {
                     Some(reference) => Reference::clone(&reference),
                     None => {
+                        println!("self.current_env: {:?}", self.current_env);
                         panic!("unknown symbol {:?}", name);
                     }
                 };
@@ -1302,8 +1305,31 @@ impl Evaluator for Interpreter {
         let reference = value.to_ref().unwrap();
         let heap_ref = reference.to_heap_ref().unwrap();
         let item = self.heap.load(heap_ref.address);
-        let obj_hash = item.to_type_reference().unwrap();
-        let obj = self.kind_table.load(&obj_hash).unwrap().to_object().unwrap();
+       
+        let (obj, obj_instance) = match item {
+            Item::ObjectInstance(oi_arc) => {
+                let obj = self.kind_table.load(&oi_arc.read().unwrap().ty).unwrap().to_object().unwrap();
+                let obj_instance = Arc::clone(&oi_arc);
+                
+                (obj, obj_instance)
+            },
+            Item::TypeReference(type_ref) => {
+                let obj = self.kind_table.load(&type_ref).unwrap().to_object().unwrap();
+
+                let obj_instance = Arc::new(RwLock::new(ObjectInstance {
+                    ty: KindHash::clone(&type_ref),
+                    contract_ty: None,
+                    is_type_complete: obj.read().unwrap().type_arguments.is_empty(),
+                    environment: Arc::new(RwLock::new(Environment::from_parent(&self.current_env))),
+                    fields: HashMap::new(),
+                }));
+
+                (obj, obj_instance)
+            },
+            i => {
+                panic!("expected Object but got {:?}", i);
+            },
+        };
 
         // TODO -> need to validate that the object init doesn't have any fields that aren't in the
         // object
@@ -1341,16 +1367,11 @@ impl Evaluator for Interpreter {
             field_values.insert(field_name.clone(), field_value);
         }
 
-        let obj_instance = ObjectInstance {
-            ty: KindHash::clone(&obj_hash),
-            contract_ty: None,
-            is_type_complete: obj.read().unwrap().type_arguments.is_empty(),
-            environment: Arc::new(RwLock::new(Environment::root())),
-            fields: field_values,
-        };
+        obj_instance.write().unwrap().fields = field_values;
+        let obj_hash = KindHash::clone(&obj_instance.read().unwrap().ty);
 
         let address = self.heap.alloc();
-        self.heap.store(address, Item::ObjectInstance(Arc::new(RwLock::new(obj_instance))));
+        self.heap.store(address, Item::ObjectInstance(obj_instance));
         let reference = Reference::HeapReference(HeapReference {
             ty: obj_hash,
             is_self: false,
@@ -1518,7 +1539,7 @@ impl Evaluator for Interpreter {
             _ => unimplemented!(),
         };
 
-        let mut environment = Environment::root();
+        let mut environment = Environment::from_parent(&self.current_env);
         for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply_ref) in zipped_type_args_with_applied_types {
             let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
             let type_to_apply_ref = Reference::create_type_reference(&type_to_apply, &mut self.heap);

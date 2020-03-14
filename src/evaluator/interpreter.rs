@@ -865,7 +865,6 @@ impl Evaluator for Interpreter {
             let p = match param {
                 parse_tree::FunctionParameter::SelfParam => {
                     let param = self.stack.pop().unwrap();
-                    println!("PARAM {:?} for func sig: {:?}", param, func_sig_syntax.name);
                     // I want an object type not a type reference
                     (SELF_VAR_SYMBOL_NAME.into(), param.to_ref().unwrap())
                 },
@@ -1060,14 +1059,25 @@ impl Evaluator for Interpreter {
     fn visit_conditional(&mut self, conditional: &parse_tree::Conditional) {
         for if_expr in conditional.if_exprs.iter() {
             self.visit_expression(&if_expr.condition);
-            let cond_value = self.stack.pop().unwrap();
+            let mut cond_value = self.stack.pop().unwrap();
 
-            let cond_scalar = match cond_value {
-                Value::Scalar(ref s) => s,
-                Value::Reference(r) => panic!("expected a boolean scalar but got reference of type: {}", r.get_ty()),
-            };
+            let mut cond_scalar = None;
+            loop {
+                match cond_value {
+                    Value::Scalar(ref s) => {
+                        cond_scalar = Some(s);
+                        break;
+                    },
+                    Value::Reference(Reference::StackReference(sr)) => {
+                        cond_value = Value::clone(&self.stack[sr.index]);
+                    },
+                    Value::Reference(Reference::HeapReference(hr)) => {
+                        panic!("expected a boolean scalar but got reference of type: {}", hr.ty);
+                    },
+                }
+            }
 
-            match cond_scalar.to_bool() {
+            match cond_scalar.unwrap().to_bool() {
                 Some(b) => {
                     if b {
                         self.visit_block_body(&if_expr.body);
@@ -1340,7 +1350,7 @@ impl Evaluator for Interpreter {
         for (field_name, expected_ty_ref) in obj.read().unwrap().fields.iter() {
             let mut expected_ty = self.heap.load_type_reference(expected_ty_ref.to_heap_ref().unwrap().address).unwrap();
 
-            expected_ty = obj_instance.read().unwrap().resolve_kind(expected_ty, &self.heap);
+            expected_ty = resolve_kind_hash(&expected_ty, &obj_instance.read().unwrap().environment, &self.heap);
 
             if !obj_init.fields.contains_key(field_name) {
                 let message = format!(
@@ -1550,7 +1560,6 @@ impl Evaluator for Interpreter {
         for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply_ref) in zipped_type_args_with_applied_types {
             let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
             let type_to_apply_ref = Reference::create_type_reference(&type_to_apply, &mut self.heap);
-            println!("DEFINING {{{}}} to be: {}", type_name, type_to_apply);
             environment.write().unwrap().define(String::clone(type_name), Reference::clone(&type_to_apply_ref));
         }
 
@@ -1754,18 +1763,11 @@ fn call(func_invoc: &FunctionInvocation, interpreter: &mut Interpreter, args: Ve
             for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
                 let address = param_kind_ref.to_heap_ref().unwrap().address;
                 let param_kind = interpreter.heap.load_type_reference(address).unwrap();
+                let param_kind = resolve_kind_hash(&param_kind, &func_invoc.environment, &interpreter.heap);
 
-                println!("PARAM_KIND: {:?}", param_kind);
-                // let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
-                let param_kind = func_invoc.resolve_kind(param_kind, &interpreter.heap);
+                let arg_ref_ty = resolve_kind_hash(&arg_ref.get_ty(), &func_invoc.environment, &interpreter.heap);
 
-                println!("FUNC_INVOC: {:?}", func_invoc);
-                println!("ARG_REF: {:?}", arg_ref);
-                // println!("chocobananas: {:?}", func_invoc.environment.read().unwrap().get_reference_by_name(&String::from("T")).unwrap());
-                // println!("61 is: {:?}", interpreter.heap.load(61));
-                // println!("HEAP: {:?}", interpreter.heap.load(62));
-
-                if arg_ref.get_ty() != param_kind {
+                if arg_ref_ty != param_kind {
                     panic!("expected argument '{}' with type: {}, got: {}",
                            n,
                            param_kind,

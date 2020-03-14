@@ -1,5 +1,8 @@
+use std::sync::{Arc,RwLock};
+
 use crate::utils::utils;
 use crate::evaluator::evaluator::{
+    Environment,
     Heap,
     Kind,
     KindHash,
@@ -174,22 +177,17 @@ impl KindHashParser {
     }
 
     fn ty(&mut self) -> Option<Type> {
-        let name_token = self.expect(NAME)?;
-        let kind_hash = Self::extract_name(&name_token).unwrap();
-        let type_param = if let Some(_) = self.expect(KindHashToken::OpenCurlyBracket) {
+        if let Some(name_token) = self.expect(NAME) {
+            let kind_hash = Self::extract_name(&name_token).unwrap();
+            Some(Type::KindHash(kind_hash))
+        } else if let Some(_) = self.expect(KindHashToken::OpenCurlyBracket) {
             let name_token = self.expect(NAME)?;
             let type_param_name = Self::extract_name(&name_token).unwrap();
-                
-            self.expect(KindHashToken::CloseCurlyBracket);
-            Some(type_param_name)
+            self.expect(KindHashToken::CloseCurlyBracket).unwrap();
+            Some(Type::TypeParam(type_param_name))
         } else {
             None
-        };
-
-        Some(Type {
-            kind_hash,
-            type_param,
-        })
+        }
     }
 
     fn type_params(&mut self) -> Option<Vec<KindHashTree>> {
@@ -214,40 +212,34 @@ impl KindHashParser {
 
 }
 
-fn resolve_tree(kind_hash_tree: KindHashTree, kind_table: &KindTable, heap: &Heap) -> KindHash {
-    // let kind_hash = if let Some(param_name) = kind_hash_tree.ty.type_param {
-    //     kind_table.keys().iter().for_each(|kh| println!("\t kh: {:?}", kh));
-    //     let ty_ref: Reference = match kind_table.load(&kind_hash_tree.ty.kind_hash).unwrap() {
-    //         // Kind::Object(o_arc) => o_arc.read().unwrap().environment.read().unwrap().get_reference_by_name(&param_name).unwrap(),
-    //         // Kind::Enum(e_arc) => e_arc.read().unwrap().environment.read().unwrap().get_reference_by_name(&param_name).unwrap(),
-    //         // Kind::FunctionSignature(fs_arc) => fs_arc.read().unwrap().environment.read().unwrap().get_reference_by_name(&param_name).unwrap(),
-    //         k => panic!("kind cannot be parameterized by types: {:?}", k),
-    //     };
-    //     heap.load_type_reference(ty_ref.to_heap_ref().unwrap().address).unwrap()
-    // } else {
-    //     kind_hash_tree.ty.kind_hash
-    // };
+fn resolve_tree(kind_hash_tree: KindHashTree, environment: &Arc<RwLock<Environment>>, heap: &Heap) -> KindHash {
+    let base = match kind_hash_tree.ty {
+        Type::KindHash(kh) => kh,
+        Type::TypeParam(type_param_name) => {
+            let type_ref = environment.read().unwrap().get_reference_by_name(&type_param_name).unwrap();
+            let type_heap_ref = type_ref.to_heap_ref().unwrap();
+            heap.load_type_reference(type_heap_ref.address).unwrap()
+        }
+    };
 
-    let kind_hash = kind_hash_tree.ty.kind_hash;
-   
     let params: Vec<KindHash> = kind_hash_tree
         .params
         .into_iter()
-        .map(|p| resolve_tree(p, kind_table, heap))
+        .map(|p| resolve_tree(p, environment, heap))
         .collect();
 
     if !params.is_empty() {
         let joined = params.join(",");
-        KindHash::from(format!("{}<<{}>>", kind_hash, joined))
+        KindHash::from(format!("{}<<{}>>", base, joined))
     } else {
-        kind_hash
+        base
     }
 }
 
-pub(crate) fn resolve_kind_hash(kind_hash: &KindHash, kind_table: &KindTable, heap: &Heap) -> KindHash {
+pub(crate) fn resolve_kind_hash(kind_hash: &KindHash, environment: &Arc<RwLock<Environment>>, heap: &Heap) -> KindHash {
     let tokens = KindHashTokenizer::of(kind_hash).tokenize();
     let tree = KindHashParser::of(tokens).parse();
-    resolve_tree(tree, kind_table, heap)
+    resolve_tree(tree, environment, heap)
 }
 
 #[derive(Debug, Clone)]
@@ -260,11 +252,17 @@ enum KindHashToken {
     Comma,
 }
 
-struct Type {
-    kind_hash: KindHash,
-    type_param: Option<String>,
+// mod::name
+// {T}
+enum Type {
+    KindHash(KindHash),
+    TypeParam(String),
 }
 
+// mod::name
+// {T}
+// mod::name<<other_mod::nested>>
+// mod::name<<other_mod::nested, {T}>>
 struct KindHashTree {
     ty: Type,
     params: Vec<KindHashTree>

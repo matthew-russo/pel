@@ -926,18 +926,6 @@ pub(crate) struct ObjectInstance {
     pub fields: HashMap<String, Value>,
 }
 
-impl ObjectInstance {
-    pub fn resolve_kind(&self, kind_to_resolve: KindHash, heap: &Heap) -> KindHash {
-        if let Some(param_name) = extract_type_variable_name(&kind_to_resolve) {
-            let type_ref = self.environment.read().unwrap().get_reference_by_name(&param_name).unwrap();
-            let type_heap_ref = type_ref.to_heap_ref().unwrap();
-            heap.load_type_reference(type_heap_ref.address).unwrap()
-        } else {
-            kind_to_resolve
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct Enum {
     pub parent: KindHash,
@@ -1091,18 +1079,6 @@ fn extract_type_variable_name(kind_hash: &KindHash) -> Option<String> {
     type_param_name_regex
         .captures(kind_hash)
         .map(|caps| caps[1].to_string())
-}
-
-impl FunctionInvocation {
-    pub fn resolve_kind(&self, kind_to_resolve: KindHash, heap: &Heap) -> KindHash {
-        if let Some(param_name) = extract_type_variable_name(&kind_to_resolve) {
-            let type_ref = self.environment.read().unwrap().get_reference_by_name(&param_name).unwrap();
-            let type_heap_ref = type_ref.to_heap_ref().unwrap();
-            heap.load_type_reference(type_heap_ref.address).unwrap()
-        } else {
-            kind_to_resolve
-        }
-    }
 }
 
 // pub(crate) trait Appliable<E: Evaluator> {

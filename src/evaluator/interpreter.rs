@@ -525,6 +525,7 @@ impl Evaluator for Interpreter {
                         name: String::clone(&vd.name),
                         type_arguments: Vec::new(),
                         parameters: vec![/*(String, KindHash*/],
+                        environment: Arc::new(RwLock::new(Environment::root())),
                         body: Some(Runnable::NativeFunction(enum_constructor)),
                         returns: Some(return_ty_ref),
                     };
@@ -850,6 +851,7 @@ impl Evaluator for Interpreter {
             name: func_sig_syntax.name.clone(),
             type_arguments: Vec::new(),
             parameters: Vec::new(),
+            environment: Arc::clone(&self.current_env),
             body: None,
             returns: None,
         };
@@ -902,7 +904,7 @@ impl Evaluator for Interpreter {
 
         self.kind_table.create(&self.heap, Kind::FunctionSignature(Arc::new(RwLock::new(func_sig))));
 
-        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        let parent_env = Arc::clone(self.current_env.read().unwrap().parent.as_ref().unwrap());
         self.current_env = parent_env;
 
         self.current_env.write().unwrap().define(func_sig_syntax.name.clone(), func_sig_ref);
@@ -958,7 +960,6 @@ impl Evaluator for Interpreter {
 
     fn visit_return(&mut self, return_stmt: &parse_tree::Return) {
         self.visit_expression(&return_stmt.value);
-        println!("visited return node and stack is: {:?}", self.stack);
         self.exiting = true;
     }
 
@@ -973,8 +974,6 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_chainable_expression(&mut self, chainable_expr: &parse_tree::ChainableExpression) {
-        println!("visit_chainable_expression: {:?}", chainable_expr);
-
         use parse_tree::ExpressionChain::*;
         use parse_tree::ExpressionStart::*;
 
@@ -992,7 +991,6 @@ impl Evaluator for Interpreter {
                 let var_ref = match self.current_env.read().unwrap().get_reference_by_name(&name) {
                     Some(reference) => Reference::clone(&reference),
                     None => {
-                        println!("self.current_env: {:?}", self.current_env);
                         panic!("unknown symbol {:?}", name);
                     }
                 };
@@ -1118,7 +1116,6 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_field_access(&mut self, field_access: &parse_tree::FieldAccess) {
-        println!("visiting field access and stack is: {:?}", self.stack);
         let to_access_value = self.stack.pop().unwrap();
         let reference = match to_access_value {
             Value::Reference(r) => r,
@@ -1144,7 +1141,6 @@ impl Evaluator for Interpreter {
                             stack_ref = StackReference::clone(sr);
                         },
                         Value::Scalar(s) => {
-                            println!("field_access: {:?}", field_access);
                             panic!("scalar: {:?} cannot be accessed with field_access syntax", s);
                         }
                         _ => unimplemented!(),
@@ -1331,14 +1327,18 @@ impl Evaluator for Interpreter {
             },
         };
 
+        if !obj_instance.read().unwrap().is_type_complete {
+            panic!("Object is not type complete");
+        }
+
         // TODO -> need to validate that the object init doesn't have any fields that aren't in the
         // object
 
         let mut field_values = HashMap::new();
         for (field_name, expected_ty_ref) in obj.read().unwrap().fields.iter() {
-            let expected_ty = self.heap.load_type_reference(expected_ty_ref.to_heap_ref().unwrap().address).unwrap();
+            let mut expected_ty = self.heap.load_type_reference(expected_ty_ref.to_heap_ref().unwrap().address).unwrap();
 
-            let expected_ty = resolve_kind_hash(&expected_ty, &self.kind_table, &self.heap);
+            expected_ty = obj_instance.read().unwrap().resolve_kind(expected_ty, &self.heap);
 
             if !obj_init.fields.contains_key(field_name) {
                 let message = format!(
@@ -1393,7 +1393,7 @@ impl Evaluator for Interpreter {
         };
 
         let mut to_apply_to_item = self.heap.load(reference.address);
-        
+
         let func = match &to_apply_to_item {
             Item::FunctionInvocation(fi) => Arc::clone(fi),
             Item::TypeReference(type_ref) => {
@@ -1403,7 +1403,7 @@ impl Evaluator for Interpreter {
                         parent: KindHash::clone(&func_sig_arc.read().unwrap().parent),
                         signature: func_sig_arc.read().unwrap().kind_hash(&self.kind_table, &self.heap),
                         is_type_complete: func_sig_arc.read().unwrap().type_arguments.is_empty(),
-                        environment: Arc::new(RwLock::new(Environment::from_parent(&self.current_env))),
+                        environment: Arc::new(RwLock::new(Environment::from_parent(&func_sig_arc.read().unwrap().environment))),
                     }))
                 } else {
                     panic!("trying to call something that isn't a function: {:?}", to_apply_to_item);
@@ -1539,11 +1539,16 @@ impl Evaluator for Interpreter {
             _ => unimplemented!(),
         };
 
-        let mut environment = Environment::from_parent(&self.current_env);
+        let mut environment = match &to_apply_to {
+            Kind::Object(_) | Kind::Enum(_) => Arc::new(RwLock::new(Environment::from_parent(&self.current_env))),
+            Kind::FunctionSignature(fs) => Arc::clone(&fs.read().unwrap().environment),
+            _ => unimplemented!(),
+        };
+
         for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply_ref) in zipped_type_args_with_applied_types {
             let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
             let type_to_apply_ref = Reference::create_type_reference(&type_to_apply, &mut self.heap);
-            environment.define(String::clone(type_name), Reference::clone(&type_to_apply_ref));
+            environment.write().unwrap().define(String::clone(type_name), Reference::clone(&type_to_apply_ref));
         }
 
         let item = match to_apply_to {
@@ -1552,7 +1557,7 @@ impl Evaluator for Interpreter {
                     ty: to_apply_to.kind_hash(&self.kind_table, &self.heap),
                     contract_ty: None,
                     is_type_complete: true,
-                    environment: Arc::new(RwLock::new(environment)),
+                    environment,
                     fields: HashMap::new(),
                 };
 
@@ -1563,19 +1568,18 @@ impl Evaluator for Interpreter {
                     ty: to_apply_to.kind_hash(&self.kind_table, &self.heap),
                     contract_ty: None,
                     is_type_complete: true,
-                    environment: Arc::new(RwLock::new(environment)),
+                    environment,
                     variant: (String::new(), None),
                 };
 
                 Item::EnumInstance(Arc::new(RwLock::new(instance)))
             },
             Kind::FunctionSignature(ref fs_arc) => {
-                let instance = FunctionInvocation
-                {
+                let instance = FunctionInvocation {
                     parent: KindHash::clone(&self.current_module),
                     signature: to_apply_to.kind_hash(&self.kind_table, &self.heap),
                     is_type_complete: true,
-                    environment: Arc::new(RwLock::new(environment)),
+                    environment,
                 };
 
                 Item::FunctionInvocation(Arc::new(RwLock::new(instance)))
@@ -1641,7 +1645,6 @@ impl Evaluator for Interpreter {
 }
 
 fn call(func_invoc: &FunctionInvocation, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
-    println!("calling function: {:?}", func_invoc);
     if !func_invoc.is_type_complete {
         panic!("trying to call method on generic method without applying tyes first");
     }

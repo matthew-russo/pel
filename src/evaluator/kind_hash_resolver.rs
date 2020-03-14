@@ -217,7 +217,6 @@ impl KindHashParser {
 fn resolve_tree(kind_hash_tree: KindHashTree, kind_table: &KindTable, heap: &Heap) -> KindHash {
     // let kind_hash = if let Some(param_name) = kind_hash_tree.ty.type_param {
     //     kind_table.keys().iter().for_each(|kh| println!("\t kh: {:?}", kh));
-    //     println!("HUYHUY: {:?}", kind_hash_tree.ty.kind_hash);
     //     let ty_ref: Reference = match kind_table.load(&kind_hash_tree.ty.kind_hash).unwrap() {
     //         // Kind::Object(o_arc) => o_arc.read().unwrap().environment.read().unwrap().get_reference_by_name(&param_name).unwrap(),
     //         // Kind::Enum(e_arc) => e_arc.read().unwrap().environment.read().unwrap().get_reference_by_name(&param_name).unwrap(),

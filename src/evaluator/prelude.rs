@@ -88,6 +88,7 @@ fn print_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Reference {
         name: String::clone(&print_name),
         type_arguments: Vec::new(),
         parameters: vec![(String::from("to_print"), Reference::create_type_reference(&KindHash::from(STRING_TY), heap))],
+        environment: Arc::new(RwLock::new(Environment::root())),
         body: Some(Runnable::NativeFunction(native_func)),
         returns: None,
     };
@@ -127,6 +128,7 @@ fn panic_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Reference {
         name: String::clone(&panic_name),
         type_arguments: Vec::new(),
         parameters: vec![(String::from("panic_message"), Reference::create_type_reference(&KindHash::from(STRING_TY), heap))],
+        environment: Arc::new(RwLock::new(Environment::root())),
         body: Some(Runnable::NativeFunction(native_func)),
         returns: None,
     };

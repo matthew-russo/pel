@@ -924,6 +924,18 @@ pub(crate) struct ObjectInstance {
     pub fields: HashMap<String, Value>,
 }
 
+impl ObjectInstance {
+    pub fn resolve_kind(&self, kind_to_resolve: KindHash, heap: &Heap) -> KindHash {
+        if let Some(param_name) = extract_type_variable_name(&kind_to_resolve) {
+            let type_ref = self.environment.read().unwrap().get_reference_by_name(&param_name).unwrap();
+            let type_heap_ref = type_ref.to_heap_ref().unwrap();
+            heap.load_type_reference(type_heap_ref.address).unwrap()
+        } else {
+            kind_to_resolve
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Enum {
     pub parent: KindHash,
@@ -969,6 +981,7 @@ pub(crate) struct FunctionSignature {
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
     pub parameters: Vec<(String, Reference)>, // name of parameter and a reference to the type it contains
+    pub environment: Arc<RwLock<Environment>>,
     pub body: Option<Runnable>,
     pub returns: Option<Reference>,
 }

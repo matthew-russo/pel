@@ -175,7 +175,8 @@ impl Interpreter {
         type_params
             .iter()
             .map(|type_param_name| {
-                let type_hole = KindHash::from(format!("{}{{{}}}", context, type_param_name));
+                // let type_hole = KindHash::from(format!("{}{{{}}}", context, type_param_name));
+                let type_hole = KindHash::from(format!("{{{}}}", type_param_name));
                 let address = self.heap.alloc();
                 let item = Item::TypeReference(KindHash::clone(&type_hole));
                 self.heap.store(address, item);
@@ -864,6 +865,7 @@ impl Evaluator for Interpreter {
             let p = match param {
                 parse_tree::FunctionParameter::SelfParam => {
                     let param = self.stack.pop().unwrap();
+                    println!("PARAM {:?} for func sig: {:?}", param, func_sig_syntax.name);
                     // I want an object type not a type reference
                     (SELF_VAR_SYMBOL_NAME.into(), param.to_ref().unwrap())
                 },
@@ -1548,6 +1550,7 @@ impl Evaluator for Interpreter {
         for ((ref type_name, ref type_hole_kind_hash), ref type_to_apply_ref) in zipped_type_args_with_applied_types {
             let type_to_apply = self.heap.load_type_reference(type_to_apply_ref.to_heap_ref().unwrap().address).unwrap();
             let type_to_apply_ref = Reference::create_type_reference(&type_to_apply, &mut self.heap);
+            println!("DEFINING {{{}}} to be: {}", type_name, type_to_apply);
             environment.write().unwrap().define(String::clone(type_name), Reference::clone(&type_to_apply_ref));
         }
 
@@ -1672,15 +1675,99 @@ fn call(func_invoc: &FunctionInvocation, interpreter: &mut Interpreter, args: Ve
                 panic!(message);
             }
 
+            if let Some((name, kind)) = signature.read().unwrap().parameters.get(0) {
+                if SELF_VAR_SYMBOL_NAME == name {
+                    // we need to take the environment from the object instance and make it the
+                    // parent of the function invocation
+                    let self_arg = Reference::clone(&args[0]);
+                    let self_arg = match self_arg {
+                        Reference::HeapReference(hr) => {
+                            interpreter.heap.load(hr.address)
+                        },
+                        Reference::StackReference(sr) => {
+                            let r = interpreter.stack[sr.index].to_ref().unwrap();
+                            let hr = r.to_heap_ref().unwrap();
+                            interpreter.heap.load(hr.address)
+                        },
+                        _ => unimplemented!(),
+                    };
+                  
+                    match self_arg {
+                        Item::ObjectInstance(oi_arc) => {
+                            let obj = interpreter
+                                .kind_table
+                                .load(&oi_arc.read().unwrap().ty)
+                                .unwrap()
+                                .to_object()
+                                .unwrap();
+
+                            for (type_arg_name, _) in &obj.read().unwrap().type_arguments {
+                                let actual_ty = oi_arc
+                                    .read()
+                                    .unwrap()
+                                    .environment
+                                    .read()
+                                    .unwrap()
+                                    .get_reference_by_name(type_arg_name)
+                                    .unwrap();
+                                
+                                func_invoc
+                                    .environment
+                                    .write()
+                                    .unwrap()
+                                    .define(String::clone(type_arg_name), actual_ty);
+                            }
+                        },
+                        Item::EnumInstance(ei_arc) => {
+                            let enu = interpreter
+                                .kind_table
+                                .load(&ei_arc.read().unwrap().ty)
+                                .unwrap()
+                                .to_object()
+                                .unwrap();
+
+                            for (type_arg_name, _) in &enu.read().unwrap().type_arguments {
+                                let actual_ty = ei_arc
+                                    .read()
+                                    .unwrap()
+                                    .environment
+                                    .read()
+                                    .unwrap()
+                                    .get_reference_by_name(type_arg_name)
+                                    .unwrap();
+                                
+                                func_invoc
+                                    .environment
+                                    .write()
+                                    .unwrap()
+                                    .define(String::clone(type_arg_name), actual_ty);
+                            }
+                        },
+                        _ => unimplemented!(),
+                    }
+                }
+            } else {
+
+            }
+
             let mut func_app_local_env = Environment::from_parent(&func_invoc.environment);
             for ((ref n, ref param_kind_ref), ref arg_ref) in signature.read().unwrap().parameters.iter().zip(args.into_iter()) {
                 let address = param_kind_ref.to_heap_ref().unwrap().address;
                 let param_kind = interpreter.heap.load_type_reference(address).unwrap();
+
+                println!("PARAM_KIND: {:?}", param_kind);
                 // let param_kind = resolve_kind_hash(&param_kind, &interpreter.kind_table, &interpreter.heap);
                 let param_kind = func_invoc.resolve_kind(param_kind, &interpreter.heap);
 
+                println!("FUNC_INVOC: {:?}", func_invoc);
+                println!("ARG_REF: {:?}", arg_ref);
+                // println!("chocobananas: {:?}", func_invoc.environment.read().unwrap().get_reference_by_name(&String::from("T")).unwrap());
+                // println!("61 is: {:?}", interpreter.heap.load(61));
+                // println!("HEAP: {:?}", interpreter.heap.load(62));
+
                 if arg_ref.get_ty() != param_kind {
-                    panic!("expected argument with type: {}, got: {}",
+                    panic!("expected argument '{}' with type: {}, got: {}",
+                           n,
                            param_kind,
                            arg_ref.get_ty());
                 }

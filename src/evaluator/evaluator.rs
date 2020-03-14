@@ -412,6 +412,7 @@ impl std::convert::From<&crate::syntax::parse_tree::Value> for Scalar {
 
 pub(crate) type Address = u32;
 
+#[derive(Debug)]
 pub(crate) struct Heap {
     next_address: Address,
     items: HashMap<Address, Item>,
@@ -840,6 +841,7 @@ impl Environment {
             self.define(String::clone(name), Reference::clone(reference));
         }
     }
+
 
     fn locals(&self, indent_level: usize) -> String {
         self.locals

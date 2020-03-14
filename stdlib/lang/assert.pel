@@ -21,4 +21,3 @@ func assert<<T>>(input: T) -> AssertionValue<<T>>; {
   };
 }
 
-

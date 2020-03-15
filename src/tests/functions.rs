@@ -61,8 +61,8 @@ mod FunctionTests {
         let code = r#"
             func main() { }
 
-            func pair_of<<A, B>>(left: A, right: B) -> (A, B); {
-              return (left, right);
+            func pair_of<<A, B>>(left: A, right: B) -> A; {
+              return right;
             }
         "#;
 
@@ -127,12 +127,19 @@ mod FunctionTests {
             use pel::lang::assert;
 
             func main() {
-              assert<<(String, int)>>(pair_of<<String, int>>("hello", 42).is(("hello", 42));
-              assert<<(int, String)>>(pair_of<<int, String>>(42, "hello").is((42, "hello"));
+              assert<<String>>(left<<String, int>>("hello", 42)).is("hello");
+              assert<<int>>(left<<int, String>>(42, "hello")).is(42);
+
+              assert<<int>>(right<<String, int>>("hello", 42)).is(42);
+              assert<<String>>(right<<int, String>>(42, "hello")).is("hello");
             }
             
-            func pair_of<<A, B>>(left: A, right: B) -> (A, B); {
-              return (left, right);
+            func left<<A, B>>(left: A, right: B) -> A; {
+              return left;
+            }
+
+            func right<<A, B>>(left: A, right: B) -> B; {
+              return right;
             }
         "#;
 

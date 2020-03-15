@@ -1630,7 +1630,7 @@ impl Evaluator for Interpreter {
                     break;
                 }
                 Value::Reference(Reference::HeapReference(hr)) => {
-                    panic!("expected lhs of binary operation to be a Scalar but was a Heap referenec to {:?}", hr.ty);
+                    panic!("expected lhs of binary operation to be a Scalar but was a Heap reference to {:?}", hr.ty);
                 },
                 Value::Reference(Reference::StackReference(sr)) => {
                     value = Value::clone(&self.stack[sr.index]);

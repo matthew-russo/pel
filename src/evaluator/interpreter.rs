@@ -563,7 +563,7 @@ impl Evaluator for Interpreter {
         self.kind_table.create(&self.heap, Kind::Enum(Arc::new(RwLock::new(enu))));
 
         let reference_to_enum = Reference::create_type_reference(&enu_kind_hash, &mut self.heap);
-        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        let parent_env = Arc::clone(&self.current_env.write().unwrap().parent.as_ref().unwrap());
         self.current_env = parent_env;
         self.current_env
             .write()
@@ -616,7 +616,7 @@ impl Evaluator for Interpreter {
         let obj_arc = self.kind_table.load(&obj_kind_hash).unwrap().to_object().unwrap();
         obj_arc.write().unwrap().methods = methods;
 
-        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        let parent_env = Arc::clone(self.current_env.write().unwrap().parent.as_ref().unwrap());
         self.current_env = parent_env;
         self.current_env
             .write()
@@ -656,7 +656,7 @@ impl Evaluator for Interpreter {
         let contract = self.kind_table.load(&contract_kind_hash).unwrap().to_contract().unwrap();
         contract.write().unwrap().required_functions = required_functions;
 
-        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        let parent_env = Arc::clone(self.current_env.write().unwrap().parent.as_ref().unwrap());
         self.current_env = parent_env;
         self.current_env
             .write()
@@ -783,7 +783,7 @@ impl Evaluator for Interpreter {
         let vtable = self.vtables.load_vtable(vptr);
         vtable.write().unwrap().functions = implementing_functions_by_name;
 
-        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        let parent_env = Arc::clone(self.current_env.write().unwrap().parent.as_ref().unwrap());
         self.current_env = parent_env;
     }
 
@@ -1123,7 +1123,7 @@ impl Evaluator for Interpreter {
             self.visit_statement(&loop_node.step);
         }
 
-        let parent_env = self.current_env.write().unwrap().parent.take().unwrap();
+        let parent_env = Arc::clone(self.current_env.write().unwrap().parent.as_ref().unwrap());
         self.current_env = parent_env;
     }
 

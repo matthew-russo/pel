@@ -1,6 +1,6 @@
 use pel::lang::assert;
 
 func main() {
-    assert<<int>>(1).is(1);
-    print("assert is true");
+    assert<<int>>(1).is(2);
+    print("assert is false");
 }

@@ -1,0 +1,22 @@
+use pel::lang::assert;
+
+func main() {
+    let wrapped: Wrapper<<int>> := Wrapper<<int>> { internal: 42, };
+    assert<<int>>(my_func<<int>(wrapped).get()).is(42);
+}
+
+func my_func<<T>>(input: Wrapper<<T>>) -> T {
+    return input.get();
+}
+
+object Wrapper<<T>> {
+  fields {
+    internal: T
+  }
+
+  methods {
+    func get() -> T {
+      return self.internal
+    }
+  }
+}

@@ -39,7 +39,7 @@ mod Objects {
         run_code(code.into());
     }
 
-    // #[test]
+    #[test]
     fn obj_creation() {
         let code = r#"
             use pel::lang::string;
@@ -62,7 +62,7 @@ mod Objects {
         run_code(code.into()); 
     }
 
-    //#[test]
+    #[test]
     fn obj_creation_generic() {
         let code = r#"
             use pel::lang::string;
@@ -87,7 +87,7 @@ mod Objects {
         run_code(code.into()); 
     }
 
-    // #[test]
+    #[test]
     fn obj_methods() {
         let code = r#"
             use pel::lang::assert;
@@ -119,7 +119,7 @@ mod Objects {
         run_code(code.into()); 
     }
 
-    // #[test]
+    #[test]
     fn obj_field_access() {
         let code = r#"
             use pel::lang::assert;

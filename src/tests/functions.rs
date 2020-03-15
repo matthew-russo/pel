@@ -56,7 +56,7 @@ mod FunctionTests {
         run_code(code.into());
     }
 
-    // #[test]
+    #[test]
     fn function_declaration_multiple_generics() {
         let code = r#"
             func main() { }
@@ -109,8 +109,8 @@ mod FunctionTests {
             use pel::lang::assert;
 
             func main() {
-                assert<<String>>(id<<String>>("hello")).is("hello");
-                assert<<int>>(id<<int>>(42)).is(42);
+                assert<<String>>("hello").is("hello");
+                assert<<int>>(42).is(42);
             }
 
             func id<<T>>(input: T) -> T; {
@@ -121,7 +121,7 @@ mod FunctionTests {
         run_code(code.into()); 
     }
 
-    // #[test]
+    #[test]
     fn function_call_multiple_generics() {
         let code = r#"
             use pel::lang::assert;

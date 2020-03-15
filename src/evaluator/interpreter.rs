@@ -218,7 +218,8 @@ impl Interpreter {
             parse_tree::Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
         };
 
-        let reference = if let Some(curr_def) = self.current_env.read().unwrap().get_reference_by_name(&var_name) {
+        let maybe_curr_def = self.current_env.read().unwrap().get_reference_by_name(&var_name);
+        let reference = if let Some(curr_def) = maybe_curr_def {
             match &curr_def {
                 Reference::StackReference(sr) => {
                     self.stack[sr.index] = val;
@@ -269,6 +270,7 @@ impl Interpreter {
             };
 
             self.current_env.write().unwrap().define(var_name, Reference::clone(&reference));
+
             reference
         };
 
@@ -1619,16 +1621,41 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_binary_operation(&mut self, bin_op: &parse_tree::BinaryOperation) {
-        let top_of_stack = self.stack.pop().unwrap();
-        let lhs_ref = top_of_stack.to_ref().expect(&format!("expected lhs of binary operation to be a stack reference but was {:?}", top_of_stack));
-        let lhs_stack_ref = lhs_ref.to_stack_ref().expect(&format!("expected lhs of binary operation to be a stack reference but was {:?}", lhs_ref));
-        let lhs = self.stack[lhs_stack_ref.index].to_scalar().expect(&format!("expected stack reference to point to scalar but was: {:?}", self.stack[lhs_stack_ref.index]));
-        
+        let mut value = self.stack.pop().unwrap();
+        let mut scalar = None;
+        loop {
+            match value {
+                Value::Scalar(s) => {
+                    scalar = Some(s);
+                    break;
+                }
+                Value::Reference(Reference::HeapReference(hr)) => {
+                    panic!("expected lhs of binary operation to be a Scalar but was a Heap referenec to {:?}", hr.ty);
+                },
+                Value::Reference(Reference::StackReference(sr)) => {
+                    value = Value::clone(&self.stack[sr.index]);
+                }
+            }
+        }
+        let lhs = scalar.take().unwrap();
+      
         self.visit_expression(&bin_op.rhs);
-        let top_of_stack = self.stack.pop().unwrap();
-        let rhs_ref = top_of_stack.to_ref().expect(&format!("expected rhs of binary operation to be a stack reference but was {:?}", top_of_stack));
-        let rhs_stack_ref = rhs_ref.to_stack_ref().expect(&format!("expected rhs of binary operation to be a stack reference but was {:?}", rhs_ref));
-        let rhs = self.stack[rhs_stack_ref.index].to_scalar().expect(&format!("expected stack reference to point to scalar but was: {:?}", self.stack[rhs_stack_ref.index]));
+        value = self.stack.pop().unwrap();
+        loop {
+            match value {
+                Value::Scalar(s) => {
+                    scalar = Some(s);
+                    break;
+                }
+                Value::Reference(Reference::HeapReference(hr)) => {
+                    panic!("expected rhs of binary operation to be a Scalar but was a Heap referenec to {:?}", hr.ty);
+                },
+                Value::Reference(Reference::StackReference(sr)) => {
+                    value = Value::clone(&self.stack[sr.index]);
+                }
+            }
+        }
+        let rhs = scalar.take().unwrap();
 
         let result = match &bin_op.op {
             parse_tree::BinaryOperator::Plus =>               Scalar::add(lhs, rhs),

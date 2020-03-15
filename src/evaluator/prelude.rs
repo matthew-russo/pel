@@ -124,13 +124,28 @@ fn panic_nat_fn(kind_table: &mut KindTable, heap: &mut Heap) -> Reference {
             panic!(message);
         }
         
-        let arg_heap_ref = args[0].to_heap_ref().unwrap();
-        let item = interp.heap.load(arg_heap_ref.address);
+        let mut reference = Reference::clone(&args[0]);
+
+        let mut item = None;
+        loop {
+            match reference {
+                Reference::StackReference(sr) => {
+                    let value = Value::clone(&interp.stack[sr.index]);
+                    reference = value.to_ref().expect("expected a string but got scalar");
+                }
+                Reference::HeapReference(hr) => {
+                    item = Some(interp.heap.load(hr.address));
+                    break;
+                }
+            }
+        }
+        let item = item.unwrap();
+
         let maybe_rust_str = pel_utils::pel_string_to_rust_string(&item, &mut interp.heap);
         if let Some(rust_str) = maybe_rust_str {
             panic!("{}", rust_str);
         } else {
-            println!("expected a string argument but got: {}", arg_heap_ref.ty);
+            println!("expected a string argument but got: {:?}", item);
         }
 
         None

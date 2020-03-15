@@ -8,8 +8,7 @@ object AssertionValue<<T>> {
   methods {
     func is(self, other: T) {
       if self.input != other {
-        let msg: String := String.format("assertion failed: %s is not equal to %s", self.input, other);
-        panic(msg);
+        panic("assertion failed");
       };
     }
   }

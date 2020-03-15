@@ -1238,7 +1238,7 @@ impl Evaluator for Interpreter {
         let reference = match to_access_value {
             Value::Reference(Reference::HeapReference(ref r)) => r,
             _ => {
-                panic!("trying to use field access syntax on a scalar or stack allocated value");
+                panic!("trying to use module access syntax on a scalar or stack allocated value");
             }
         };
         let item = self.heap.load(reference.address);

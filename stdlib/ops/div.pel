@@ -1,0 +1,3 @@
+contract Div<<T>> {
+    func div(self, other: T) -> Self;
+}

@@ -1,0 +1,3 @@
+contract Mul<<T>> {
+    func mul(self, other: T) -> Self;
+}

@@ -1,0 +1,6 @@
+use pel::lang::assert;
+
+func main() {
+    let x: int := 1 + 2;
+    assert<<int>>(x).is(3);
+}

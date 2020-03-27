@@ -1,0 +1,119 @@
+object BinaryTreeNode<<T>> {
+    fields {
+        data: T,
+        left: BinaryTree<<T>>,
+        right: BinaryTree<<T>>,
+    }
+}
+
+enum BinaryTree<<T>> {
+    variants {
+        Empty,
+        Node(BinaryTreeNode<<T>>),
+    }
+
+    methods {
+        func insert(self, to_add: T) {
+            match self {
+                Empty => {
+                    self = Node(BinaryTreeNode<<T>> {
+                        data: to_add,
+                        left: BinaryTree<<T>>::Empty,
+                        right: BinaryTree<<T>>::Empty,
+                    })
+                },
+                Node(n) => {
+                    if n.data == to_add {
+                        // TODO -> error
+                    } else if n.data < to_add {
+                        n.right.insert(to_add);
+                    } else {
+                        n.left.insert(to_add);
+                    }
+                }
+            }
+        }
+
+        func remove(self, to_remove: T) {
+            match self {
+                Empty => {
+                    // TODO -> error
+                },
+                Node(n) => {
+                    if n.data == to_remove {
+                        // TODO: remove and rebalance
+                    } else if n.data < to_remove {
+                        n.right.remove(to_remove);
+                    } else {
+                        n.left.remove(to_remove);
+                    }
+                },
+            }
+        }
+
+        func search(self, to_find: T) -> Option<<BinaryTreeNode<<T>>>> {
+            match self {
+                Empty => {
+                    return Option::None
+                },
+                Node(n) => {
+                    if n.data == to_add {
+                        return Option::Some(n);
+                    } else if n.data < to_add {
+                        n.right.search(to_find);
+                    } else {
+                        n.left.search(to_find);
+                    }
+                }
+            }
+        }
+
+        // left, root, right
+        func inorder_traversal(self) -> Vec<<T>> {
+            match self {
+                Empty => {
+                    return Vecs::empty<<T>>();
+                },
+                Node(n) => {
+                    let root: Vec<<T>> = Vecs::singleton<<T>>(self.data);
+                    let left: Vec<<T>> = self.left.inorder_traversal();
+                    let right: Vec<<T>> = self.right.inorder_traversal();
+
+                    return left.concat(root).concat(right);
+                },
+            }
+        }
+
+        // root, left, right
+        func preorder_traversal(self) -> Vec<<T>> {
+            match self {
+                Empty => {
+                    return Vecs::empty<<T>>();
+                },
+                Node(n) => {
+                    let root: Vec<<T>> = Vecs::singleton<<T>>(self.data);
+                    let left: Vec<<T>> = self.left.inorder_traversal();
+                    let right: Vec<<T>> = self.right.inorder_traversal();
+
+                    return root.concat(left).concat(right);
+                },
+            }
+        }
+
+        // left, right, root
+        func postorder_traversal(self) -> Vec<<T>> {
+            match self {
+                Empty => {
+                    return Vecs::empty<<T>>();
+                },
+                Node(n) => {
+                    let root: Vec<<T>> = Vecs::singleton<<T>>(self.data);
+                    let left: Vec<<T>> = self.left.inorder_traversal();
+                    let right: Vec<<T>> = self.right.inorder_traversal();
+
+                    return left.concat(right).concat(root);
+                },
+            }
+        }
+    }
+}

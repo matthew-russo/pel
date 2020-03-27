@@ -29,6 +29,16 @@ object Vec<<T>> {
       let self.internal[self.len]: T := t;
     }
 
+    func append(self, other: Vec<<T>>) {
+      for let i: int := 0; i < other.len(); let i: int := i + 1; {
+        self.add(other.get(i));
+      }
+    }
+
+    func concat(self, other: Vec<<T>>) -> Vec<<T>> {
+      // TODO: implement
+    }
+
     func double_capacity(self) {
       let new_internal: [T] := [T; capacity * 2];
       Array.copy(self.internal, new_internal);
@@ -36,4 +46,14 @@ object Vec<<T>> {
       let self.capacity: int := self.capacity * 2;
     }
   }
+}
+
+module Vecs {
+    func empty<<T>>() -> Vec<<T>> {
+
+    }
+
+    func singleton<<T>>(t: T) -> Vec<<T>> {
+
+    }
 }

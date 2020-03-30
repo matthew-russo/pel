@@ -1,3 +1,3 @@
-contract Eq<<T>> {
-    func eq(self, other: T) -> Self;
+contract Eq {
+    func eq(self, other: Self) -> Self;
 }

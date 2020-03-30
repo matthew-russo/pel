@@ -4,7 +4,7 @@ use std::fs;
 use std::ops::{Deref};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
-
+use either::Either;
 use crate::evaluator::evaluator::{
     Address,
     Array,
@@ -41,6 +41,7 @@ use crate::evaluator::prelude;
 use crate::lexer::lexer::Lexer;
 use crate::parser::parser::Parser;
 use crate::syntax::parse_tree;
+use crate::utils;
 
 //        -- environment --            ----- state -----
 //      /                   \        /                   \
@@ -367,6 +368,79 @@ impl Interpreter {
             ty: self.stack[self.stack.len() - 1].get_ty(),
             index: self.stack.len() - 1,
             size: std::u32::MAX,
+        }
+    }
+
+    fn resolve_value(&self, val: Value) -> Either<Scalar, HeapReference> {
+        let value = val;
+        loop {
+            match value {
+                Value::Scalar(s) => {
+                    return Either::Left(s);
+                }
+                Value::Reference(Reference::HeapReference(hr)) => {
+                    return Either::Right(hr);
+                },
+                Value::Reference(Reference::StackReference(sr)) => {
+                    value = Value::clone(&self.stack[sr.index]);
+                }
+            }
+        }
+    }
+
+    fn add(&self, lhs: Value, rhs: Value) -> Value {
+        let lhs = self.resolve_value(lhs);
+        let rhs = self.resolve_value(rhs);
+        assert!(utils::discriminants_equal(&lhs, &rhs));
+
+        match lhs {
+            Either::Left(lhs_scalar) => {
+                let rhs_scalar = rhs.left().unwrap();
+                let result = Scalar::add(lhs_scalar, rhs_scalar);
+                Value::Scalar(result)
+            },
+            Either::Right(lhs_heap_ref) => {
+                let rhs_heap_ref = rhs.right().unwrap();
+
+                let lhs_ty = self.kind_table.load(lhs_heap_ref.ty);
+                let vtable = match lhs_ty.get_vtable(PEL_OPS_ADD_CONTRACT_NAME) {
+                    Some(vtable_id) => self.vtables.load_vtable(vtable_id),
+                    None => panic!("heap reference to {} must implement {} in order to be combined with the plus operator", lhs_heap_ref.ty, PEL_OPS_ADD_CONTRACT_NAME),
+                };
+
+                if lhs_heap_ref.ty != rhs_heap_ref.ty {
+                    panic!("expected kind of right hand side of plus operator to be {} but got {}", lhs_heap_ref.ty, rhs_heap_ref.ty);
+                }
+
+                let add_func_ref = vtable.functions.get(PEL_OPS_ADD_FUNC_NAME);
+                let add_func_sig = self.kind_table.load(&self.heap.load_type_reference(add_func_ref.address).unwrap());
+
+                let func_environment = Environment::from_parent(&self.current_env);
+                let func_invoc = FunctionInvocation {
+                    parent: add_func_ref.ty,
+                    signature: add_func_ref.ty,
+                    is_type_complete: true,
+                    environment: Arc::new(RwLock::new(func_environment)),
+                };
+
+                let args = vec![
+                    Reference::HeapReference(HeapReference {
+                        ty: lhs_heap_ref.ty,
+                        is_self: true,
+                        address: lhs_heap_ref.address,
+                        size: std::u32::MAX,
+                    }),
+                    Reference::HeapReference(HeapReference {
+                        ty: rhs_heap_ref.ty,
+                        is_self: true,
+                        address: rhs_heap_ref.address,
+                        size: std::u32::MAX,
+                    }),
+                ];
+
+                let result = call(&func_invoc, &mut self, args).unwrap();
+                Value::Reference(result)
+            }
         }
     }
 }
@@ -1620,42 +1694,27 @@ impl Evaluator for Interpreter {
         panic!("unimplemented visit_lambda");
     }
 
+        // let mut scalar = None;
+        // loop {
+        //     match value {
+        //         Value::Scalar(s) => {
+        //             scalar = Some(s);
+        //             break;
+        //         }
+        //         Value::Reference(Reference::HeapReference(hr)) => {
+        //             panic!("expected lhs of binary operation to be a Scalar but was a Heap reference to {:?}", hr.ty);
+        //         },
+        //         Value::Reference(Reference::StackReference(sr)) => {
+        //             value = Value::clone(&self.stack[sr.index]);
+        //         }
+        //     }
+        // }
+        // let lhs = scalar.take().unwrap();
+
     fn visit_binary_operation(&mut self, bin_op: &parse_tree::BinaryOperation) {
-        let mut value = self.stack.pop().unwrap();
-        let mut scalar = None;
-        loop {
-            match value {
-                Value::Scalar(s) => {
-                    scalar = Some(s);
-                    break;
-                }
-                Value::Reference(Reference::HeapReference(hr)) => {
-                    panic!("expected lhs of binary operation to be a Scalar but was a Heap reference to {:?}", hr.ty);
-                },
-                Value::Reference(Reference::StackReference(sr)) => {
-                    value = Value::clone(&self.stack[sr.index]);
-                }
-            }
-        }
-        let lhs = scalar.take().unwrap();
-      
+        let lhs = self.stack.pop().unwrap();
         self.visit_expression(&bin_op.rhs);
-        value = self.stack.pop().unwrap();
-        loop {
-            match value {
-                Value::Scalar(s) => {
-                    scalar = Some(s);
-                    break;
-                }
-                Value::Reference(Reference::HeapReference(hr)) => {
-                    panic!("expected rhs of binary operation to be a Scalar but was a Heap referenec to {:?}", hr.ty);
-                },
-                Value::Reference(Reference::StackReference(sr)) => {
-                    value = Value::clone(&self.stack[sr.index]);
-                }
-            }
-        }
-        let rhs = scalar.take().unwrap();
+        let rhs = self.stack.pop().unwrap();
 
         let result = match &bin_op.op {
             parse_tree::BinaryOperator::Plus =>               Scalar::add(lhs, rhs),
@@ -1673,7 +1732,7 @@ impl Evaluator for Interpreter {
         };
 
         let scalar_ty = result.get_ty();
-        self.stack.push(Value::Scalar(result));
+        self.stack.push(result);
         let stack_ref = Reference::StackReference(StackReference {
             ty: scalar_ty,
             index: self.stack.len() - 1,
@@ -1681,11 +1740,13 @@ impl Evaluator for Interpreter {
         });
         self.stack.push(Value::Reference(stack_ref));
     }
+
+    
 }
 
 fn call(func_invoc: &FunctionInvocation, interpreter: &mut Interpreter, args: Vec<Reference>) -> Option<Reference> {
     if !func_invoc.is_type_complete {
-        panic!("trying to call method on generic method without applying tyes first");
+        panic!("trying to call polymorphic method without applying types first");
     }
 
     let signature = interpreter.kind_table

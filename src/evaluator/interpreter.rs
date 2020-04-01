@@ -388,7 +388,78 @@ impl Interpreter {
         }
     }
 
-    fn add(&self, lhs: Value, rhs: Value) -> Value {
+
+    fn scalar_binary_operation(&self, lhs: Scalar, rhs: Scalar, bin_op: parse_tree::BinaryOperator) -> Scalar {
+        match bin_op {
+            parse_tree::BinaryOperator::Plus =>               Scalar::add(lhs, rhs),
+            parse_tree::BinaryOperator::Minus =>              Scalar::subtract(lhs, rhs),
+            parse_tree::BinaryOperator::Multiply =>           Scalar::multiply(lhs, rhs),
+            parse_tree::BinaryOperator::Divide =>             Scalar::divide(lhs, rhs),
+            parse_tree::BinaryOperator::LessThan =>           Scalar::less_than(lhs, rhs),
+            parse_tree::BinaryOperator::LessThanOrEqual =>    Scalar::less_than_or_equal(lhs, rhs),
+            parse_tree::BinaryOperator::GreaterThan =>        Scalar::greater_than(lhs, rhs),
+            parse_tree::BinaryOperator::GreaterThanOrEqual => Scalar::greater_than_or_equal(lhs, rhs),
+            parse_tree::BinaryOperator::Equal =>              Scalar::equal_to(lhs, rhs),
+            parse_tree::BinaryOperator::NotEqual =>           Scalar::not_equal_to(lhs, rhs),
+            parse_tree::BinaryOperator::Or =>                 Scalar::or(lhs, rhs),
+            parse_tree::BinaryOperator::And =>                Scalar::and(lhs, rhs),
+        }
+    }
+
+    fn heap_reference_binary_operation(&self, lhs: HeapReference, rhs: HeapReference, bin_op: parse_tree::BinaryOperator) -> Reference {
+        let (contract_name, func_name) = self.get_op_info(bin_op);
+
+        let lhs_ty = self.kind_table.load(&lhs.ty);
+        let vtable = match lhs_ty.get_vtable(contract_name) {
+            Some(vtable_id) => self.vtables.load_vtable(vtable_id),
+            None => panic!("heap reference to {} must implement {} in order to be combined with the plus operator", lhs.ty, contract_name),
+        };
+
+        if lhs.ty != rhs.ty {
+            panic!("expected kind of right hand side of plus operator to be {} but got {}", lhs.ty, rhs.ty);
+        }
+
+        let add_func_ref = vtable
+            .read()
+            .unwrap()
+            .functions
+            .get(func_name)
+            .unwrap()
+            .to_heap_ref()
+            .unwrap();
+
+        let add_func_sig = self.kind_table
+            .load(&self.heap
+                  .load_type_reference(add_func_ref.address)
+                  .unwrap());
+
+        let func_environment = Environment::from_parent(&self.current_env);
+        let func_invoc = FunctionInvocation {
+            parent: add_func_ref.ty,
+            signature: add_func_ref.ty,
+            is_type_complete: true,
+            environment: Arc::new(RwLock::new(func_environment)),
+        };
+
+        let args = vec![
+            Reference::HeapReference(HeapReference {
+                ty: lhs.ty,
+                is_self: true,
+                address: lhs.address,
+                size: std::u32::MAX,
+            }),
+            Reference::HeapReference(HeapReference {
+                ty: rhs.ty,
+                is_self: true,
+                address: rhs.address,
+                size: std::u32::MAX,
+            }),
+        ];
+
+        call(&func_invoc, &mut self, args).unwrap()
+    }
+
+    fn binary_operation(&self, lhs: Value, rhs: Value, bin_op: parse_tree::BinaryOperator) -> Value {
         let lhs = self.resolve_value(lhs);
         let rhs = self.resolve_value(rhs);
         assert!(utils::discriminants_equal(&lhs, &rhs));
@@ -396,51 +467,14 @@ impl Interpreter {
         match lhs {
             Either::Left(lhs_scalar) => {
                 let rhs_scalar = rhs.left().unwrap();
-                let result = Scalar::add(lhs_scalar, rhs_scalar);
+                let result = self.scalar_binary_operation(lhs_scalar, rhs_scalar, bin_op);
                 Value::Scalar(result)
             },
             Either::Right(lhs_heap_ref) => {
                 let rhs_heap_ref = rhs.right().unwrap();
-
-                let lhs_ty = self.kind_table.load(lhs_heap_ref.ty);
-                let vtable = match lhs_ty.get_vtable(PEL_OPS_ADD_CONTRACT_NAME) {
-                    Some(vtable_id) => self.vtables.load_vtable(vtable_id),
-                    None => panic!("heap reference to {} must implement {} in order to be combined with the plus operator", lhs_heap_ref.ty, PEL_OPS_ADD_CONTRACT_NAME),
-                };
-
-                if lhs_heap_ref.ty != rhs_heap_ref.ty {
-                    panic!("expected kind of right hand side of plus operator to be {} but got {}", lhs_heap_ref.ty, rhs_heap_ref.ty);
-                }
-
-                let add_func_ref = vtable.functions.get(PEL_OPS_ADD_FUNC_NAME);
-                let add_func_sig = self.kind_table.load(&self.heap.load_type_reference(add_func_ref.address).unwrap());
-
-                let func_environment = Environment::from_parent(&self.current_env);
-                let func_invoc = FunctionInvocation {
-                    parent: add_func_ref.ty,
-                    signature: add_func_ref.ty,
-                    is_type_complete: true,
-                    environment: Arc::new(RwLock::new(func_environment)),
-                };
-
-                let args = vec![
-                    Reference::HeapReference(HeapReference {
-                        ty: lhs_heap_ref.ty,
-                        is_self: true,
-                        address: lhs_heap_ref.address,
-                        size: std::u32::MAX,
-                    }),
-                    Reference::HeapReference(HeapReference {
-                        ty: rhs_heap_ref.ty,
-                        is_self: true,
-                        address: rhs_heap_ref.address,
-                        size: std::u32::MAX,
-                    }),
-                ];
-
-                let result = call(&func_invoc, &mut self, args).unwrap();
+                let result = self.heap_reference_binary_operation(lhs_heap_ref, rhs_heap_ref, bin_op);
                 Value::Reference(result)
-            }
+            },
         }
     }
 }
@@ -1716,29 +1750,17 @@ impl Evaluator for Interpreter {
         self.visit_expression(&bin_op.rhs);
         let rhs = self.stack.pop().unwrap();
 
-        let result = match &bin_op.op {
-            parse_tree::BinaryOperator::Plus =>               Scalar::add(lhs, rhs),
-            parse_tree::BinaryOperator::Minus =>              Scalar::subtract(lhs, rhs),
-            parse_tree::BinaryOperator::Multiply =>           Scalar::multiply(lhs, rhs),
-            parse_tree::BinaryOperator::Divide =>             Scalar::divide(lhs, rhs),
-            parse_tree::BinaryOperator::LessThan =>           Scalar::less_than(lhs, rhs),
-            parse_tree::BinaryOperator::LessThanOrEqual =>    Scalar::less_than_or_equal(lhs, rhs),
-            parse_tree::BinaryOperator::GreaterThan =>        Scalar::greater_than(lhs, rhs),
-            parse_tree::BinaryOperator::GreaterThanOrEqual => Scalar::greater_than_or_equal(lhs, rhs),
-            parse_tree::BinaryOperator::Equal =>              Scalar::equal_to(lhs, rhs),
-            parse_tree::BinaryOperator::NotEqual =>           Scalar::not_equal_to(lhs, rhs),
-            parse_tree::BinaryOperator::Or =>                 Scalar::or(lhs, rhs),
-            parse_tree::BinaryOperator::And =>                Scalar::and(lhs, rhs),
-        };
-
-        let scalar_ty = result.get_ty();
-        self.stack.push(result);
-        let stack_ref = Reference::StackReference(StackReference {
-            ty: scalar_ty,
-            index: self.stack.len() - 1,
-            size: std::u32::MAX,
-        });
-        self.stack.push(Value::Reference(stack_ref));
+        let result = self.binary_operation(lhs, rhs, bin_op.op);
+       
+        // TODO -> do i need this?
+        // let scalar_ty = result.get_ty();
+        // self.stack.push(result);
+        // let stack_ref = Reference::StackReference(StackReference {
+        //     ty: scalar_ty,
+        //     index: self.stack.len() - 1,
+        //     size: std::u32::MAX,
+        // });
+        // self.stack.push(Value::Reference(stack_ref));
     }
 
     

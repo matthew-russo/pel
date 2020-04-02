@@ -573,6 +573,16 @@ impl Kind {
             _ => None,
         }
     }
+
+    pub fn get_vtable(&self, name: &String) -> Option<VTableId> {
+        use Kind::*;
+
+        match self {
+            Object(obj_arc) => obj_arc.read().unwrap().vtables.get(name).copied(),
+            Enum(enu_arc) => enu_arc.read().unwrap().vtables.get(name).copied(),
+            _ => None,
+        }
+    }
 }
 
 impl Clone for Kind {

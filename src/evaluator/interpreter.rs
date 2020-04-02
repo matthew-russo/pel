@@ -372,7 +372,7 @@ impl Interpreter {
     }
 
     fn resolve_value(&self, val: Value) -> Either<Scalar, HeapReference> {
-        let value = val;
+        let mut value = val;
         loop {
             match value {
                 Value::Scalar(s) => {
@@ -389,7 +389,7 @@ impl Interpreter {
     }
 
 
-    fn scalar_binary_operation(&self, lhs: Scalar, rhs: Scalar, bin_op: parse_tree::BinaryOperator) -> Scalar {
+    fn scalar_binary_operation(&self, lhs: Scalar, rhs: Scalar, bin_op: &parse_tree::BinaryOperator) -> Scalar {
         match bin_op {
             parse_tree::BinaryOperator::Plus =>               Scalar::add(lhs, rhs),
             parse_tree::BinaryOperator::Minus =>              Scalar::subtract(lhs, rhs),
@@ -406,24 +406,40 @@ impl Interpreter {
         }
     }
 
-    fn heap_reference_binary_operation(&self, lhs: HeapReference, rhs: HeapReference, bin_op: parse_tree::BinaryOperator) -> Reference {
+    fn get_op_info(&self, bin_op: &parse_tree::BinaryOperator) -> (String, String) {
+        match bin_op {
+            parse_tree::BinaryOperator::Plus =>               (String::from("pel::lang::ops::Add"), String::from("add")),
+            parse_tree::BinaryOperator::Minus =>              (String::from("pel::lang::ops::Sub"), String::from("sub")),
+            parse_tree::BinaryOperator::Multiply =>           (String::from("pel::lang::ops::Mul"), String::from("mul")),
+            parse_tree::BinaryOperator::Divide =>             (String::from("pel::lang::ops::Div"), String::from("div")),
+            parse_tree::BinaryOperator::LessThan =>           (String::from("TODO -> Cmp"), String::from("TODO -> Cmp")),
+            parse_tree::BinaryOperator::LessThanOrEqual =>    (String::from("TODO -> Cmp"), String::from("TODO -> Cmp")),
+            parse_tree::BinaryOperator::GreaterThan =>        (String::from("TODO -> Cmp"), String::from("TODO -> Cmp")),
+            parse_tree::BinaryOperator::GreaterThanOrEqual => (String::from("TODO -> Cmp"), String::from("TODO -> Cmp")),
+            parse_tree::BinaryOperator::Equal =>              (String::from("pel::lang::ops::Eq"), String::from("eq")),
+            parse_tree::BinaryOperator::NotEqual =>           (String::from("pel::lang::ops::Eq"), String::from("not_eq")),
+            b => panic!("operator {:?} cannot be used with heap reference", b),
+        }
+    }
+
+    fn heap_reference_binary_operation(&mut self, lhs: HeapReference, rhs: HeapReference, bin_op: &parse_tree::BinaryOperator) -> Reference {
         let (contract_name, func_name) = self.get_op_info(bin_op);
 
-        let lhs_ty = self.kind_table.load(&lhs.ty);
-        let vtable = match lhs_ty.get_vtable(contract_name) {
+        let lhs_ty = self.kind_table.load(&lhs.ty).unwrap();
+        let vtable = match lhs_ty.get_vtable(&contract_name) {
             Some(vtable_id) => self.vtables.load_vtable(vtable_id),
-            None => panic!("heap reference to {} must implement {} in order to be combined with the plus operator", lhs.ty, contract_name),
+            None => panic!("heap reference to {} must implement {} in order to be combined with the {:?} operator", lhs.ty, contract_name, bin_op),
         };
 
         if lhs.ty != rhs.ty {
             panic!("expected kind of right hand side of plus operator to be {} but got {}", lhs.ty, rhs.ty);
         }
 
-        let add_func_ref = vtable
-            .read()
-            .unwrap()
+        let vtable_readable = vtable.read().unwrap();
+
+        let add_func_ref = vtable_readable
             .functions
-            .get(func_name)
+            .get(&func_name)
             .unwrap()
             .to_heap_ref()
             .unwrap();
@@ -435,8 +451,8 @@ impl Interpreter {
 
         let func_environment = Environment::from_parent(&self.current_env);
         let func_invoc = FunctionInvocation {
-            parent: add_func_ref.ty,
-            signature: add_func_ref.ty,
+            parent: KindHash::clone(&add_func_ref.ty),
+            signature: KindHash::clone(&add_func_ref.ty),
             is_type_complete: true,
             environment: Arc::new(RwLock::new(func_environment)),
         };
@@ -456,10 +472,10 @@ impl Interpreter {
             }),
         ];
 
-        call(&func_invoc, &mut self, args).unwrap()
+        call(&func_invoc, self, args).unwrap()
     }
 
-    fn binary_operation(&self, lhs: Value, rhs: Value, bin_op: parse_tree::BinaryOperator) -> Value {
+    fn binary_operation(&mut self, lhs: Value, rhs: Value, bin_op: &parse_tree::BinaryOperator) -> Value {
         let lhs = self.resolve_value(lhs);
         let rhs = self.resolve_value(rhs);
         assert!(utils::discriminants_equal(&lhs, &rhs));
@@ -1750,7 +1766,7 @@ impl Evaluator for Interpreter {
         self.visit_expression(&bin_op.rhs);
         let rhs = self.stack.pop().unwrap();
 
-        let result = self.binary_operation(lhs, rhs, bin_op.op);
+        let result = self.binary_operation(lhs, rhs, &bin_op.op);
        
         // TODO -> do i need this?
         // let scalar_ty = result.get_ty();

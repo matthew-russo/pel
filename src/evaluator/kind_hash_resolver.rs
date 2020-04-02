@@ -1,6 +1,6 @@
 use std::sync::{Arc,RwLock};
 
-use crate::utils::utils;
+use crate::utils;
 use crate::evaluator::evaluator::{
     Environment,
     Heap,

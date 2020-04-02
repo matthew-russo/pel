@@ -4,7 +4,7 @@ use std::fmt::Display;
 
 use crate::lexer::tokens::*;
 use crate::syntax::parse_tree::*;
-use crate::utils::utils;
+use crate::utils;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ParseError {

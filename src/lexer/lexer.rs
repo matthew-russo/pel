@@ -295,6 +295,7 @@ impl Lexer {
             TYPE => Ok(Type),
             DEPENDENT => Ok(Dependent),
             ON => Ok(On),
+            MODULE => Ok(Module),
             CONTRACT => Ok(Contract),
             ENUM => Ok(Enum),
             OBJECT => Ok(Object),

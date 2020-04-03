@@ -41,6 +41,7 @@ pub(crate) enum Token {
     Type,
     Dependent,
     On,
+    Module,
     Contract,
     Enum,
     Object,
@@ -119,6 +120,7 @@ impl Display for Token {
             Type               => "Type".to_string(),
             Dependent          => "Dependent".to_string(),
             On                 => "On".to_string(),
+            Module             => "Module".to_string(),
             Contract           => "Contract".to_string(),
             Enum               => "Enum".to_string(),
             Object             => "Object".to_string(),
@@ -169,6 +171,7 @@ pub(crate) const DOUBLE_QUOTE : &str = "\"";
 pub(crate) const TYPE         : &str = "type";
 pub(crate) const DEPENDENT    : &str = "dependent";
 pub(crate) const ON           : &str = "on";
+pub(crate) const MODULE       : &str = "module";
 pub(crate) const CONTRACT     : &str = "contract";
 pub(crate) const ENUM         : &str = "enum";
 pub(crate) const OBJECT       : &str = "object";

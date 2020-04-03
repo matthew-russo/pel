@@ -114,6 +114,10 @@ impl Parser {
                 let message = format!("unexpected reserved type token");
                 Err(ParseError::Message(message))
             },
+            Token::Module => {
+                let obj_decl = self.module_declaration()?;
+                Ok(Declaration::ModuleDeclarationNode(obj_decl))
+            },
             Token::Enum => {
                 let enum_decl = self.enum_declaration()?;
                 Ok(Declaration::EnumDeclarationNode(enum_decl))
@@ -215,6 +219,30 @@ impl Parser {
         }
 
         Ok(args)
+    }
+
+    fn module_declaration(&mut self) -> Result<ModuleDeclaration, ParseError> {
+        self.expect(Token::Module, "module_declaration")?;
+        let mod_name_token = self.expect(IDENTIFIER, "enum_declaration")?;
+        let mod_name = Self::extract_identifier(&mod_name_token).unwrap();
+        
+        self.expect(Token::OpenCurlyBracket, "module_declaration")?;
+
+        let mut functions = Vec::new();
+
+        loop {
+            match self.function_declaration() {
+                Ok(func_decl) => functions.push(func_decl),
+                Err(_) => break
+            }
+        }
+
+        self.expect(Token::CloseCurlyBracket, "module_declaration")?;
+
+        Ok(ModuleDeclaration {
+            mod_name,
+            functions,
+        })
     }
 
     fn enum_declaration(&mut self) -> Result<EnumDeclaration, ParseError> {

@@ -7,12 +7,19 @@ pub(crate) struct Program {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Declaration {
+    ModuleDeclarationNode(ModuleDeclaration),
     EnumDeclarationNode(EnumDeclaration),
     ContractDeclarationNode(ContractDeclaration),
     ImplementationDeclarationNode(ImplementationDeclaration),
     ObjectDeclarationNode(ObjectDeclaration),
     FunctionDeclarationNode(FunctionDeclaration),
     UseDeclarationNode(UseDeclaration),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ModuleDeclaration {
+    pub mod_name: String,
+    pub functions: Vec<FunctionDeclaration>,
 }
 
 #[derive(Debug, Clone)]

@@ -768,14 +768,15 @@ impl Evaluator for Interpreter {
         self.kind_table.create(&self.heap, Kind::Contract(Arc::new(RwLock::new(contract))));
 
         let reference_to_contract = Reference::create_type_reference(&contract_kind_hash, &mut self.heap);
+        self.current_env.write().unwrap().define(String::from(SELF_TYPE_SYMBOL_NAME), Reference::clone(&reference_to_contract));
 
         let required_functions = contract_decl.functions
                 .iter()
                 .map(|fs| {
                     self.stack.push(Value::Reference(Reference::clone(&reference_to_contract)));
                     self.visit_function_signature(&fs);
-                    let reference = self.stack.pop().unwrap().to_ref().unwrap();
-                    KindHash::clone(&reference.to_heap_ref().unwrap().ty)
+                    let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fs.name).unwrap();
+                    KindHash::clone(&func_ref.to_heap_ref().unwrap().ty)
                 })
                 .collect();
 

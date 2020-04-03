@@ -67,6 +67,30 @@ use crate::utils;
 // | Name | AddressOfBody | EnvironmentId |
 // +------+---------------+---------------+
 
+#[derive(Debug)]
+pub(crate) struct InterpreterError {
+    source: Box<dyn std::error::Error>,
+    details: String
+}
+
+impl InterpreterError {
+    fn new(source: Box<dyn std::error::Error>, msg: &str) -> InterpreterError {
+        InterpreterError {
+            source,
+            details: msg.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for InterpreterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}" , self)
+    }
+}
+
+
+impl std::error::Error for InterpreterError { }
+
 pub(crate) struct Interpreter {
     lexer: Lexer,
     parser: Parser,
@@ -136,8 +160,12 @@ impl Interpreter {
     }
     
     pub fn interpret_file<P: AsRef<Path>>(&mut self, src_file: P, module_chain: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        let file_name = format!("{}", src_file.as_ref().display());
         let src = fs::read_to_string(src_file)?;
-        self.interpret_code(src, module_chain)
+        match self.interpret_code(src, module_chain) {
+            Err(e) => Err(Box::new(InterpreterError::new(e, &format!("failed to interpret file: {:?}", file_name)))),
+            ok => ok
+        }
     }
 
     pub fn interpret_code(&mut self, code: String, module_chain: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -1898,7 +1926,7 @@ fn call(func_invoc: &FunctionInvocation, interpreter: &mut Interpreter, args: Ve
                     panic!("expected argument '{}' with type: {}, got: {}",
                            n,
                            param_kind,
-                           arg_ref.get_ty());
+                           arg_ref_ty);
                 }
 
                 func_app_local_env.define(n.clone(), Reference::clone(&arg_ref));

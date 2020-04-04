@@ -16,7 +16,7 @@ enum BinaryTree<<T>> {
         func insert(self, to_add: T) {
             match self {
                 Empty => {
-                    self = Node(BinaryTreeNode<<T>> {
+                    self: BinaryTree<<T>> := Node(BinaryTreeNode<<T>> {
                         data: to_add,
                         left: BinaryTree<<T>>::Empty,
                         right: BinaryTree<<T>>::Empty,

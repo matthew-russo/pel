@@ -537,6 +537,9 @@ impl Evaluator for Interpreter {
         use parse_tree::Declaration::*;
 
         match decl {
+            ModuleDeclarationNode(mod_decl)
+                => self.visit_module_declaration(mod_decl),
+
             EnumDeclarationNode(enum_decl)
                 => self.visit_enum_declaration(enum_decl),
 
@@ -555,6 +558,10 @@ impl Evaluator for Interpreter {
             UseDeclarationNode(use_decl)
                 => self.visit_use_declaration(use_decl),
         }
+    }
+
+    fn visit_module_declaration(&mut self, mod_decl: &parse_tree::ModuleDeclaration) {
+        unimplemented!("visit_module_declaration()");
     }
 
     fn visit_enum_declaration(&mut self, enum_decl: &parse_tree::EnumDeclaration) {

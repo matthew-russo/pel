@@ -29,14 +29,14 @@ object Vec<<T>> {
       let self.internal[self.len]: T := t;
     }
 
-    func append(self, other: Vec<<T>>) {
+    func append(self, other: Self<<T>>) {
       for let i: int := 0; i < other.len(); let i: int := i + 1; {
         self.add(other.get(i));
       };
     } 
 
-    func concat(self, other: Vec<<T>>) -> Vec<<T>>; {
-      let to_return: Vec<<T>> := Vec::empty();
+    func concat(self, other: Self<<T>>) -> Self<<T>>; {
+      let to_return: Self<<T>> := Vecs::empty();
 
       for let i: int := 0; i < self.len(); let i: int := i + 1; {
         to_return.add(self.get(i));
@@ -59,11 +59,17 @@ object Vec<<T>> {
 }
 
 module Vecs {
-    func empty<<T>>() -> Vec<<T>> {
+  func empty<<T>>() -> Vec<<T>>; {
+    return Vec<<T>> {
+      internal: [T; 0],
+      len: 0,
+      capacity: 0,
+    };
+  }
 
-    }
-
-    func singleton<<T>>(t: T) -> Vec<<T>> {
-
-    }
+  func singleton<<T>>(t: T) -> Vec<<T>>; {
+    let v: Vec<<T>> := Vecs::empty<<T>>();
+    v.add(t);
+    return v;
+  }
 }

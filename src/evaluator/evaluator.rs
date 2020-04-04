@@ -322,64 +322,56 @@ impl Scalar {
         return Scalar::Double(lhs + rhs);
     }
 
-    // TODO -> This should take floats too
     pub fn subtract(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Integer(lhs - rhs);
     }
 
-    // TODO -> This should take floats too
     pub fn multiply(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Integer(lhs * rhs);
     }
 
-    // TODO -> This should take floats too
     pub fn divide(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Integer(lhs / rhs);
     }
 
-    // TODO -> This should take floats too
     pub fn less_than(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Boolean(lhs < rhs);
     }
 
-    // TODO -> This should take floats too
     pub fn less_than_or_equal(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Boolean(lhs <= rhs);
     }
 
-    // TODO -> This should take floats too
     pub fn greater_than(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Boolean(lhs > rhs);
     }
 
-    // TODO -> This should take floats too
     pub fn greater_than_or_equal(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Boolean(lhs >= rhs);
     }
 
-    // TODO -> This should take any value type
     pub fn equal_to(lhs: Self, rhs: Self) -> Self {
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Boolean(lhs == rhs);
     }
 
-    // TODO -> This should take any value type
     pub fn not_equal_to(lhs: Self, rhs: Self) -> Self {
+        println!("\n\ncalling not_equal_to -- lhs: {:?}, rhs: {:?}\n\n", lhs, rhs);
         let lhs = lhs.to_int().unwrap();
         let rhs = rhs.to_int().unwrap();
         return Scalar::Boolean(lhs != rhs);

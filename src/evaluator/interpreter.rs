@@ -462,7 +462,7 @@ impl Interpreter {
         let lhs_ty = self.kind_table.load(&lhs.ty).unwrap();
         let vtable = match lhs_ty.get_vtable(&contract_name) {
             Some(vtable_id) => self.vtables.load_vtable(vtable_id),
-            None => panic!("heap reference to {} must implement {} in order to be combined with the {:?} operator", lhs.ty, contract_name, bin_op),
+            None => panic!("heap reference to {} must implement {} in order to be used with the {:?} operator", lhs.ty, contract_name, bin_op),
         };
 
         if lhs.ty != rhs.ty {
@@ -861,6 +861,7 @@ impl Evaluator for Interpreter {
             panic!("implementor type must be a reference to a kind but got {}", implementor_type_heap_ref.ty);
         }
         let implementor_kind_hash = self.heap.load_type_reference(implementor_type_heap_ref.address).unwrap();
+        self.current_env.write().unwrap().define(String::from(SELF_TYPE_SYMBOL_NAME), Reference::clone(&implementor_type_ref));
 
         self.visit_expression(&impl_decl.contract);
         let contract_type_ref = self.stack.pop().unwrap().to_ref().unwrap();
@@ -944,14 +945,14 @@ impl Evaluator for Interpreter {
 
             let implementor_func_ref = implementing_functions_by_name.get(req_name).unwrap();
             let implementor_func_heap_ref = implementor_func_ref.to_heap_ref().unwrap();
-            let implementor_func = self.heap.load(implementor_func_heap_ref.address).to_function_invocation().unwrap();
-            let implementor_sig = self.kind_table.load(&implementor_func.read().unwrap().signature).unwrap().to_func_sig().unwrap();
+            let implementor_func_kind_hash = self.heap.load_type_reference(implementor_func_heap_ref.address).unwrap();
+            let implementor_sig = self.kind_table.load(&implementor_func_kind_hash).unwrap().to_func_sig().unwrap();
 
             if !req_sig.read().unwrap().is_compatible_with(implementor_sig.read().unwrap().deref(), &self.kind_table, &self.heap) {
                 let message = format!("Function with name: {} has signature: {} but expected: {}",
                                       req_name,
                                       req_sig.read().unwrap().kind_hash(&self.kind_table, &self.heap),
-                                      implementor_func.read().unwrap().signature);
+                                      implementor_func_kind_hash);
                 panic!(message);
             }
         }
@@ -1246,7 +1247,6 @@ impl Evaluator for Interpreter {
         for if_expr in conditional.if_exprs.iter() {
             self.visit_expression(&if_expr.condition);
             let mut cond_value = self.stack.pop().unwrap();
-
             let mut cond_scalar = None;
             loop {
                 match cond_value {
@@ -1827,16 +1827,15 @@ impl Evaluator for Interpreter {
         let rhs = self.stack.pop().unwrap();
 
         let result = self.binary_operation(lhs, rhs, &bin_op.op);
-       
-        // TODO -> do i need this?
-        // let scalar_ty = result.get_ty();
-        // self.stack.push(result);
-        // let stack_ref = Reference::StackReference(StackReference {
-        //     ty: scalar_ty,
-        //     index: self.stack.len() - 1,
-        //     size: std::u32::MAX,
-        // });
-        // self.stack.push(Value::Reference(stack_ref));
+      
+        let scalar_ty = result.get_ty();
+        self.stack.push(result);
+        let stack_ref = Reference::StackReference(StackReference {
+            ty: scalar_ty,
+            index: self.stack.len() - 1,
+            size: std::u32::MAX,
+        });
+        self.stack.push(Value::Reference(stack_ref));
     }
 
     

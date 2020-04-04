@@ -1,4 +1,5 @@
 use pel::lang::arrays;
+use pel::ops::eq;
 
 object String {
   fields {
@@ -67,5 +68,15 @@ object String {
         internal: new_chars,
       };
     }
+  }
+}
+
+implement Eq for String {
+  func eq(self, other: Self) -> bool; {
+    return Arrays::contents_equal(self.internal, other.internal);
+  }
+
+  func not_eq(self, other: Self) -> bool; {
+    return !self.eq(other);
   }
 }

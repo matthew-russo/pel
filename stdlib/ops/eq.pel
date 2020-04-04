@@ -1,4 +1,4 @@
 contract Eq {
-    func eq(self, other: Self) -> Self;;
-    func not_eq(self, other: Self) -> Self;;
+    func eq(self, other: Self) -> bool;;
+    func not_eq(self, other: Self) -> bool;;
 }

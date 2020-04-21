@@ -163,7 +163,7 @@ impl Interpreter {
         let file_name = format!("{}", src_file.as_ref().display());
 
         // hack to avoid actually making binary trees work
-        if file_name.contains("stdlib/collections/binary_tree.pel") {
+        if file_name.contains("binary_tree.pel") {
             return Ok(());
         }
 

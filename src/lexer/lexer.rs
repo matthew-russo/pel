@@ -44,6 +44,8 @@ pub(crate) struct Lexer {
     input: String,
     start: i32,
     current: i32,
+    row: i32,
+    col: i32,
     lexing: Vec<char>,
     tokens: Vec<Token>
 }
@@ -54,6 +56,8 @@ impl Lexer {
             input: String::new(),
             start: 0,
             current: 0,
+            row: 0,
+            col: 0,
             lexing: Vec::new(),
             tokens: Vec::new(),
         }
@@ -163,9 +167,13 @@ impl Lexer {
             Ok(token) => return Ok(token),
             Err(_) => ()
         }
-      
+
         let current_char = self.current_char();
-        let message = format!("failed to lex at position: {:?}, char: {:?}", self.current, current_char);
+        let message = format!("failed to lex at row: {:?}, col: {:?}, position: {:?}, char: {:?}",
+                              self.row,
+                              self.col,
+                              self.current,
+                              current_char);
         Err(LexError::Message(message))
     }
 
@@ -454,7 +462,15 @@ impl Lexer {
     fn chomp(&mut self) -> char {
         let current_char = self.current_char();
         self.lexing.push(current_char);
-        self.current = self.current + 1;
+        self.current += 1;
+
+        if current_char == '\n' {
+            self.row += 1;
+            self.col = 0;
+        } else {
+            self.col += 1;
+        }
+
         return current_char;
     }
 

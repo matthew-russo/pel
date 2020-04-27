@@ -36,12 +36,12 @@ impl Error for ParseError {
     }
 }
 
-const IDENTIFIER: Token = Token::Identifier(String::new());
-const STRING_LIT: Token = Token::StringLit(String::new());
-const CHAR_LIT: Token = Token::CharLit('y');
-const BOOL_LIT: Token = Token::BooleanLit(true);
-const INT_LIT: Token = Token::IntegerLit(42);
-const FLOAT_LIT: Token = Token::FloatLit(42.0);
+const IDENTIFIER: TokenData = TokenData::Identifier(String::new());
+const STRING_LIT: TokenData = TokenData::StringLit(String::new());
+const CHAR_LIT: TokenData = TokenData::CharLit('y');
+const BOOL_LIT: TokenData = TokenData::BooleanLit(true);
+const INT_LIT: TokenData = TokenData::IntegerLit(42);
+const FLOAT_LIT: TokenData = TokenData::FloatLit(42.0);
 
 #[derive(Debug)]
 pub(crate) struct Parser {
@@ -67,7 +67,7 @@ impl Parser {
         self.program()
     }
 
-    fn expect(&mut self, expected_token: Token, currently_parsing: &str) -> Result<Token, ParseError> {
+    fn expect(&mut self, expected_token: TokenData, currently_parsing: &str) -> Result<TokenData, ParseError> {
         let next_token = self.current_token();
 
         if utils::discriminants_equal(&expected_token, &next_token) {
@@ -78,14 +78,15 @@ impl Parser {
         Err(ParseError::Message(format!("expected {} while parsing {} but got {} at {}", expected_token, currently_parsing, next_token, self.current)))
     }
 
-    fn current_token(&self) -> Token {
-        self.tokens[self.current].clone()
+    fn current_token(&self) -> TokenData {
+        let token = self.tokens.get(self.current).unwrap();
+        token.data.clone()
     }
 
-    fn extract_identifier(t: &Token) -> Option<String> {
+    fn extract_identifier(t: &TokenData) -> Option<String> {
         // TODO -> maybe get rid of clone
         return match t {
-            Token::Identifier(id) => Some(id.clone()),
+            TokenData::Identifier(id) => Some(id.clone()),
             _ => None
         }
     }
@@ -93,7 +94,7 @@ impl Parser {
     fn program(&mut self) -> Result<Program, ParseError> {
         let mut declarations = Vec::new();
         loop {
-            if let Token::EOF = self.current_token() {
+            if let TokenData::EOF = self.current_token() {
                 break
             }
 
@@ -110,35 +111,35 @@ impl Parser {
 
     fn declaration(&mut self) -> Result<Declaration, ParseError> {
         return match self.current_token() {
-            Token::Type => {
+            TokenData::Type => {
                 let message = format!("unexpected reserved type token");
                 Err(ParseError::Message(message))
             },
-            Token::Module => {
+            TokenData::Module => {
                 let obj_decl = self.module_declaration()?;
                 Ok(Declaration::ModuleDeclarationNode(obj_decl))
             },
-            Token::Enum => {
+            TokenData::Enum => {
                 let enum_decl = self.enum_declaration()?;
                 Ok(Declaration::EnumDeclarationNode(enum_decl))
             },
-            Token::Contract => {
+            TokenData::Contract => {
                 let contract_decl = self.contract_declaration()?;
                 Ok(Declaration::ContractDeclarationNode(contract_decl))
             },
-            Token::Implement => {
+            TokenData::Implement => {
                 let impl_decl = self.implementation_declaration()?;
                 Ok(Declaration::ImplementationDeclarationNode(impl_decl))
             },
-            Token::Object => {
+            TokenData::Object => {
                 let obj_decl = self.object_declaration()?;
                 Ok(Declaration::ObjectDeclarationNode(obj_decl))
             },
-            Token::Func => {
+            TokenData::Func => {
                 let func_decl = self.function_declaration()?;
                 Ok(Declaration::FunctionDeclarationNode(func_decl))
             },
-            Token::Use => {
+            TokenData::Use => {
                 let use_decl = self.use_declaration()?;
                 Ok(Declaration::UseDeclarationNode(use_decl))
             },
@@ -150,23 +151,23 @@ impl Parser {
     }
 
     fn generic_params(&mut self) -> Result<Vec<String>, ParseError> {
-        self.expect(Token::OpenDoubleAngleBracket, "generic_params")?;
+        self.expect(TokenData::OpenDoubleAngleBracket, "generic_params")?;
        
         let mut params = Vec::new();
 
         match self.current_token() {
-            Token::Identifier(id) => {
+            TokenData::Identifier(id) => {
                 self.expect(IDENTIFIER, "generic_params")?;
                 params.push(id);
 
                 loop {
                     match self.current_token() {
-                        Token::CloseDoubleAngleBracket => {
-                            self.expect(Token::CloseDoubleAngleBracket, "generic_params")?;
+                        TokenData::CloseDoubleAngleBracket => {
+                            self.expect(TokenData::CloseDoubleAngleBracket, "generic_params")?;
                             break;
                         },
-                        Token::Comma => {
-                            self.expect(Token::Comma, "generic_params")?;
+                        TokenData::Comma => {
+                            self.expect(TokenData::Comma, "generic_params")?;
                             let id_token = self.expect(IDENTIFIER, "generic_params")?;
                             let id = Self::extract_identifier(&id_token).unwrap();
                             params.push(id);
@@ -179,7 +180,7 @@ impl Parser {
                 }
             },
             _ => {
-                self.expect(Token::CloseDoubleAngleBracket, "generic_params")?;
+                self.expect(TokenData::CloseDoubleAngleBracket, "generic_params")?;
             }
         }
 
@@ -187,25 +188,25 @@ impl Parser {
     }
 
     fn generic_args(&mut self) -> Result<Vec<Expression>, ParseError> {
-        self.expect(Token::OpenDoubleAngleBracket, "generic_args")?;
+        self.expect(TokenData::OpenDoubleAngleBracket, "generic_args")?;
        
         let mut args = Vec::new();
 
         match self.current_token() {
-            Token::CloseDoubleAngleBracket => {
-                    self.expect(Token::CloseDoubleAngleBracket, "generic_args")?;
+            TokenData::CloseDoubleAngleBracket => {
+                    self.expect(TokenData::CloseDoubleAngleBracket, "generic_args")?;
             },
             _ => {
                 let expr = self.expression()?;
                 args.push(expr);
                 loop {
                     match self.current_token() {
-                        Token::CloseDoubleAngleBracket => {
-                            self.expect(Token::CloseDoubleAngleBracket, "generic_args")?;
+                        TokenData::CloseDoubleAngleBracket => {
+                            self.expect(TokenData::CloseDoubleAngleBracket, "generic_args")?;
                             break;
                         },
-                        Token::Comma => {
-                            self.expect(Token::Comma, "generic_args")?;
+                        TokenData::Comma => {
+                            self.expect(TokenData::Comma, "generic_args")?;
                             let expr = self.expression()?;
                             args.push(expr);
                         },
@@ -222,11 +223,11 @@ impl Parser {
     }
 
     fn module_declaration(&mut self) -> Result<ModuleDeclaration, ParseError> {
-        self.expect(Token::Module, "module_declaration")?;
+        self.expect(TokenData::Module, "module_declaration")?;
         let mod_name_token = self.expect(IDENTIFIER, "enum_declaration")?;
         let mod_name = Self::extract_identifier(&mod_name_token).unwrap();
         
-        self.expect(Token::OpenCurlyBracket, "module_declaration")?;
+        self.expect(TokenData::OpenCurlyBracket, "module_declaration")?;
 
         let mut functions = Vec::new();
 
@@ -237,7 +238,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::CloseCurlyBracket, "module_declaration")?;
+        self.expect(TokenData::CloseCurlyBracket, "module_declaration")?;
 
         Ok(ModuleDeclaration {
             mod_name,
@@ -246,27 +247,27 @@ impl Parser {
     }
 
     fn enum_declaration(&mut self) -> Result<EnumDeclaration, ParseError> {
-        self.expect(Token::Enum, "enum_declaration")?;
+        self.expect(TokenData::Enum, "enum_declaration")?;
         let type_name_token = self.expect(IDENTIFIER, "enum_declaration")?;
         let type_name = Self::extract_identifier(&type_name_token).unwrap();
 
         let type_params = match self.current_token() {
-            Token::OpenDoubleAngleBracket => {
+            TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
             },
             _ => Vec::new(),
         };
         
-        self.expect(Token::OpenCurlyBracket, "enum_declaration")?;
+        self.expect(TokenData::OpenCurlyBracket, "enum_declaration")?;
         let variants = self.variants()?;
 
         let methods = match self.current_token() {
-            Token::Methods => self.methods()?,
+            TokenData::Methods => self.methods()?,
             _ => Vec::new(),
         };
 
-        self.expect(Token::CloseCurlyBracket, "enum_declaration")?;
+        self.expect(TokenData::CloseCurlyBracket, "enum_declaration")?;
 
         Ok(EnumDeclaration {
             type_name,
@@ -277,27 +278,27 @@ impl Parser {
     }
 
     fn object_declaration(&mut self) -> Result<ObjectDeclaration, ParseError> {
-        self.expect(Token::Object, "object_declaration")?;
+        self.expect(TokenData::Object, "object_declaration")?;
         let type_name_token = self.expect(IDENTIFIER, "object_declaration")?;
         let type_name = Self::extract_identifier(&type_name_token).unwrap();
 
         let type_params = match self.current_token() {
-            Token::OpenDoubleAngleBracket => {
+            TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
             },
             _ => Vec::new(),
         };
 
-        self.expect(Token::OpenCurlyBracket, "object_declaration")?;
+        self.expect(TokenData::OpenCurlyBracket, "object_declaration")?;
         let fields = self.fields()?;
         
-        let methods = match self.tokens[self.current] {
-            Token::Methods => self.methods()?,
+        let methods = match self.current_token() {
+            TokenData::Methods => self.methods()?,
             _ => Vec::new(),
         };
 
-        self.expect(Token::CloseCurlyBracket, "object_declaration")?;
+        self.expect(TokenData::CloseCurlyBracket, "object_declaration")?;
 
         Ok(ObjectDeclaration {
             type_name,
@@ -308,19 +309,19 @@ impl Parser {
     }
 
     fn contract_declaration(&mut self) -> Result<ContractDeclaration, ParseError> {
-        self.expect(Token::Contract, "contract_declaration")?;
+        self.expect(TokenData::Contract, "contract_declaration")?;
         let type_name_token = self.expect(IDENTIFIER, "contract_declaration")?;
         let type_name = Self::extract_identifier(&type_name_token).unwrap();
 
         let type_params = match self.current_token() {
-            Token::OpenDoubleAngleBracket => {
+            TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
             },
             _ => Vec::new(),
         };
 
-        self.expect(Token::OpenCurlyBracket, "contract_declaration")?;
+        self.expect(TokenData::OpenCurlyBracket, "contract_declaration")?;
 
         let mut functions = Vec::new();
 
@@ -329,10 +330,10 @@ impl Parser {
                 Ok(func) => functions.push(func),
                 Err(_) => break
             }
-            self.expect(Token::Semicolon, "contract_declaration")?;
+            self.expect(TokenData::Semicolon, "contract_declaration")?;
         }
         
-        self.expect(Token::CloseCurlyBracket, "contract_declaration")?;
+        self.expect(TokenData::CloseCurlyBracket, "contract_declaration")?;
 
         Ok(ContractDeclaration {
             type_name,
@@ -342,13 +343,13 @@ impl Parser {
     }
 
     fn implementation_declaration(&mut self) -> Result<ImplementationDeclaration, ParseError> {
-        self.expect(Token::Implement, "implementation_declaration")?;
+        self.expect(TokenData::Implement, "implementation_declaration")?;
         let contract = self.expression()?;
 
-        self.expect(Token::For, "implementation_declaration")?;
+        self.expect(TokenData::For, "implementation_declaration")?;
         let implementing_type = self.expression()?;
 
-        self.expect(Token::OpenCurlyBracket, "implementation_declaration")?;
+        self.expect(TokenData::OpenCurlyBracket, "implementation_declaration")?;
 
         let mut functions = Vec::new();
 
@@ -359,7 +360,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::CloseCurlyBracket, "implementation_declaration")?;
+        self.expect(TokenData::CloseCurlyBracket, "implementation_declaration")?;
 
         Ok(ImplementationDeclaration {
             implementing_type,
@@ -374,9 +375,9 @@ impl Parser {
             Err(_) => None
         };
         let signature = self.function_signature()?;
-        self.expect(Token::OpenCurlyBracket, "function_declaration")?;
+        self.expect(TokenData::OpenCurlyBracket, "function_declaration")?;
         let body = self.block_body()?;
-        self.expect(Token::CloseCurlyBracket, "function_declaration")?;
+        self.expect(TokenData::CloseCurlyBracket, "function_declaration")?;
        
         Ok(FunctionDeclaration {
             visibility,
@@ -386,14 +387,14 @@ impl Parser {
     }
 
     fn use_declaration(&mut self) -> Result<UseDeclaration, ParseError> {
-        self.expect(Token::Use, "use_declaration")?;
+        self.expect(TokenData::Use, "use_declaration")?;
       
         let name_token = self.expect(IDENTIFIER, "use_declaration")?;
         let name = Self::extract_identifier(&name_token).unwrap();
         let mut import_chain = vec![name];
 
         loop {
-            match self.expect(Token::DoubleColon, "use_declaration") {
+            match self.expect(TokenData::DoubleColon, "use_declaration") {
                 Ok(_) => {
                     let name_token = self.expect(IDENTIFIER, "use_declaration")?;
                     let name = Self::extract_identifier(&name_token).unwrap();
@@ -403,7 +404,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::Semicolon, "use_declaration")?;
+        self.expect(TokenData::Semicolon, "use_declaration")?;
 
         Ok(UseDeclaration {
             import_chain,
@@ -411,44 +412,44 @@ impl Parser {
     }
 
     fn visibility(&mut self) -> Result<Visibility, ParseError> {
-        return match self.tokens[self.current] {
-            Token::Public => {
-                self.expect(Token::Public, "visibility")?;
+        return match self.current_token() {
+            TokenData::Public => {
+                self.expect(TokenData::Public, "visibility")?;
                 Ok(Visibility::Public)
             },
             _ => {
-                let message = format!("unable to parse visibility at {}", self.tokens[self.current]);
+                let message = format!("unable to parse visibility at {}", self.current_token());
                 Err(ParseError::Message(message))
             }
         }
     }
 
     fn function_signature(&mut self) -> Result<FunctionSignature, ParseError> {
-        self.expect(Token::Func, "function_signature")?;
+        self.expect(TokenData::Func, "function_signature")?;
         let name_token = self.expect(IDENTIFIER, "function_signature")?;
         let name = Self::extract_identifier(&name_token).unwrap();
 
         let type_parameters = match self.current_token() {
-            Token::OpenDoubleAngleBracket => {
+            TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
             },
             _ => Vec::new(),
         };
 
-        self.expect(Token::OpenParen, "function_signature")?;
+        self.expect(TokenData::OpenParen, "function_signature")?;
 
         let mut parameters = Vec::new();
 
         match self.current_token() {
-            Token::CloseParen => (),
+            TokenData::CloseParen => (),
             _ => {
                 let param = self.function_parameter()?;
                 parameters.push(param);
                 loop {
                     match self.current_token() {
-                        Token::Comma => {
-                            self.expect(Token::Comma, "function_signature")?;
+                        TokenData::Comma => {
+                            self.expect(TokenData::Comma, "function_signature")?;
                             let param = self.function_parameter()?;
                             parameters.push(param);
                         },
@@ -458,13 +459,13 @@ impl Parser {
             },
         }
 
-        self.expect(Token::CloseParen, "function_signature")?;
+        self.expect(TokenData::CloseParen, "function_signature")?;
 
         let returns = match self.current_token() {
-            Token::Arrow => {
-                self.expect(Token::Arrow, "function_signature")?;
+            TokenData::Arrow => {
+                self.expect(TokenData::Arrow, "function_signature")?;
                 let expr = self.expression()?;
-                self.expect(Token::Semicolon, "function_signature")?;
+                self.expect(TokenData::Semicolon, "function_signature")?;
                 Some(expr)
             },
             _ => None
@@ -480,8 +481,8 @@ impl Parser {
 
     fn function_parameter(&mut self) -> Result<FunctionParameter, ParseError> {
         return match self.current_token() {
-            Token::SelfVariable => {
-                self.expect(Token::SelfVariable, "function_parameter")?;
+            TokenData::SelfVariable => {
+                self.expect(TokenData::SelfVariable, "function_parameter")?;
                 Ok(FunctionParameter::SelfParam)
             },
             _ => {
@@ -494,7 +495,7 @@ impl Parser {
     fn typed_variable_declaration(&mut self) -> Result<TypedVariableDeclaration, ParseError> {
         let name_token = self.expect(IDENTIFIER, "typed_variable_declaration")?;
         let name = Self::extract_identifier(&name_token).unwrap();
-        self.expect(Token::Colon, "typed_variable_declaration")?;
+        self.expect(TokenData::Colon, "typed_variable_declaration")?;
         let type_reference = self.expression()?;
 
         Ok(TypedVariableDeclaration {
@@ -504,8 +505,8 @@ impl Parser {
     }
 
     fn variants(&mut self) -> Result<Vec<VariantDeclaration>, ParseError> {
-        self.expect(Token::Variants, "variants")?;
-        self.expect(Token::OpenCurlyBracket, "variants")?;
+        self.expect(TokenData::Variants, "variants")?;
+        self.expect(TokenData::OpenCurlyBracket, "variants")?;
         
         let mut variants = Vec::new();
 
@@ -516,7 +517,7 @@ impl Parser {
             }
         }
         
-        self.expect(Token::CloseCurlyBracket, "variants")?;
+        self.expect(TokenData::CloseCurlyBracket, "variants")?;
 
         Ok(variants)
     }
@@ -527,16 +528,16 @@ impl Parser {
         
         let mut contains = None;
 
-        match self.expect(Token::OpenParen, "variant_declaration") {
+        match self.expect(TokenData::OpenParen, "variant_declaration") {
             Ok(_) => {
                 let type_reference = self.expression()?;
-                self.expect(Token::CloseParen, "variant_declaration")?;
+                self.expect(TokenData::CloseParen, "variant_declaration")?;
                 contains = Some(type_reference)
             },
             Err(_) => (),
         }
 
-        self.expect(Token::Comma, "variant_declaration")?;
+        self.expect(TokenData::Comma, "variant_declaration")?;
 
         Ok(VariantDeclaration {
             name,
@@ -545,8 +546,8 @@ impl Parser {
     }
 
     fn fields(&mut self) -> Result<Vec<TypedVariableDeclaration>, ParseError> {
-        self.expect(Token::Fields, "fields")?;
-        self.expect(Token::OpenCurlyBracket, "fields")?;
+        self.expect(TokenData::Fields, "fields")?;
+        self.expect(TokenData::OpenCurlyBracket, "fields")?;
         
         let mut fields = Vec::new();
 
@@ -556,17 +557,17 @@ impl Parser {
                 Err(_) => break
             }
 
-            self.expect(Token::Comma, "fields")?;
+            self.expect(TokenData::Comma, "fields")?;
         }
 
-        self.expect(Token::CloseCurlyBracket, "fields")?;
+        self.expect(TokenData::CloseCurlyBracket, "fields")?;
 
         Ok(fields)
     }
 
     fn methods(&mut self) -> Result<Vec<FunctionDeclaration>, ParseError> {
-        self.expect(Token::Methods, "methods")?;
-        self.expect(Token::OpenCurlyBracket, "methods")?;
+        self.expect(TokenData::Methods, "methods")?;
+        self.expect(TokenData::OpenCurlyBracket, "methods")?;
         
         let mut methods = Vec::new();
 
@@ -577,14 +578,14 @@ impl Parser {
             }
         }
     
-        self.expect(Token::CloseCurlyBracket, "methods")?;
+        self.expect(TokenData::CloseCurlyBracket, "methods")?;
 
         Ok(methods)
     }
 
     fn functions(&mut self) -> Result<Vec<FunctionDeclaration>, ParseError> {
-        self.expect(Token::Functions, "functions")?;
-        self.expect(Token::OpenCurlyBracket, "functions")?;
+        self.expect(TokenData::Functions, "functions")?;
+        self.expect(TokenData::OpenCurlyBracket, "functions")?;
         
         let mut functions = Vec::new();
 
@@ -595,7 +596,7 @@ impl Parser {
             }
         }
     
-        self.expect(Token::CloseCurlyBracket, "functions")?;
+        self.expect(TokenData::CloseCurlyBracket, "functions")?;
 
         Ok(functions)
     }
@@ -604,7 +605,7 @@ impl Parser {
         let mut statements = Vec::new();
 
         loop {
-            if let Token::CloseCurlyBracket = self.current_token() {
+            if let TokenData::CloseCurlyBracket = self.current_token() {
                 break;
             }
 
@@ -619,26 +620,26 @@ impl Parser {
 
     fn statement(&mut self) -> Result<Statement, ParseError> {
         return match self.current_token() {
-            Token::Let => {
+            TokenData::Let => {
                 let assignment = self.variable_assignment()?;
-                self.expect(Token::Semicolon, "statement")?;
+                self.expect(TokenData::Semicolon, "statement")?;
                 Ok(Statement::VariableAssignmentNode(assignment))
             },
-            Token::Return => {
+            TokenData::Return => {
                 let return_stmt = self.return_stmt()?;
-                self.expect(Token::Semicolon, "statement")?;
+                self.expect(TokenData::Semicolon, "statement")?;
                 Ok(Statement::ReturnNode(return_stmt))        
             },
             _ => {
                 let expr = self.expression()?;
-                self.expect(Token::Semicolon, "statement")?;
+                self.expect(TokenData::Semicolon, "statement")?;
                 Ok(Statement::ExpressionNode(expr))
             }
         }
     }
 
     fn return_stmt(&mut self) -> Result<Return, ParseError> {
-        self.expect(Token::Return, "statement")?;
+        self.expect(TokenData::Return, "statement")?;
         let value = self.expression()?;
 
         Ok(Return {
@@ -648,8 +649,8 @@ impl Parser {
  
     fn expression(&mut self) -> Result<Expression, ParseError> {
         return match self.current_token() {
-            Token::LogicalNot => {
-                self.expect(Token::LogicalNot, "expression")?;
+            TokenData::LogicalNot => {
+                self.expect(TokenData::LogicalNot, "expression")?;
                 let expr = self.chainable_expression()?;
                 let op = UnaryOperation {
                     op: UnaryOperator::Not,
@@ -657,7 +658,7 @@ impl Parser {
                 };
                 Ok(Expression::UnaryOperationNode(Box::new(op)))
             },
-            Token::Pipe => {
+            TokenData::Pipe => {
                 let lambda = self.lambda()?;
                 Ok(Expression::LambdaNode(Box::new(lambda)))
             },
@@ -669,18 +670,18 @@ impl Parser {
     }
 
     fn lambda(&mut self) -> Result<Lambda, ParseError> {
-        self.expect(Token::Pipe, "lambda")?;
+        self.expect(TokenData::Pipe, "lambda")?;
        
         let mut params = Vec::new();
         match self.current_token() {
-            Token::Identifier(id) => {
+            TokenData::Identifier(id) => {
                 let param = self.typed_variable_declaration()?;
                 params.push(param);
 
                 loop {
                     match self.current_token() {
-                        Token::Comma => {
-                            self.expect(Token::Comma, "lambda")?;
+                        TokenData::Comma => {
+                            self.expect(TokenData::Comma, "lambda")?;
                             let param = self.typed_variable_declaration()?;
                             params.push(param);
                         },
@@ -691,10 +692,10 @@ impl Parser {
             _ => ()
         }
 
-        self.expect(Token::Pipe, "lambda")?;
-        self.expect(Token::OpenCurlyBracket, "lambda")?;
+        self.expect(TokenData::Pipe, "lambda")?;
+        self.expect(TokenData::OpenCurlyBracket, "lambda")?;
         let body = self.block_body()?;
-        self.expect(Token::CloseCurlyBracket, "lambda")?;
+        self.expect(TokenData::CloseCurlyBracket, "lambda")?;
 
         Ok(Lambda {
             params,
@@ -708,7 +709,7 @@ impl Parser {
         let mut chained = Vec::new();
         loop {
             match self.current_token() {
-                Token::Dot => {
+                TokenData::Dot => {
                     let current = self.current;
                     if let Ok(field_access) = self.field_access() {
                         chained.push(ExpressionChain::FieldAccessNode(field_access));
@@ -717,7 +718,7 @@ impl Parser {
                         break;
                     }
                 },
-                Token::DoubleColon => {
+                TokenData::DoubleColon => {
                     let current = self.current;
                     if let Ok(mod_access) = self.module_access() {
                         chained.push(ExpressionChain::ModuleAccessNode(mod_access));
@@ -726,7 +727,7 @@ impl Parser {
                         break;
                     }
                 },
-                Token::OpenSquareBracket => {
+                TokenData::OpenSquareBracket => {
                     let current = self.current;
                     if let Ok(arr_access) = self.array_access() {
                         chained.push(ExpressionChain::ArrayAccessNode(arr_access));
@@ -735,7 +736,7 @@ impl Parser {
                         break;
                     }
                 },
-                Token::OpenCurlyBracket => {
+                TokenData::OpenCurlyBracket => {
                     let current = self.current;
                     if let Ok(obj_init) = self.object_initialization() {
                         chained.push(ExpressionChain::ObjectInitializationNode(obj_init));
@@ -744,7 +745,7 @@ impl Parser {
                         break;
                     }
                 },
-                Token::OpenParen => {
+                TokenData::OpenParen => {
                     let current = self.current;
                     if let Ok(func_app) = self.function_application() {
                         chained.push(ExpressionChain::FunctionApplicationNode(func_app));
@@ -753,7 +754,7 @@ impl Parser {
                         break;
                     }
                 },
-                Token::OpenDoubleAngleBracket => {
+                TokenData::OpenDoubleAngleBracket => {
                     let current = self.current;
                     if let Ok(type_application) = self.type_application() {
                         chained.push(ExpressionChain::TypeApplicationNode(type_application));
@@ -762,8 +763,8 @@ impl Parser {
                         break;
                     }
                 },
-                Token::Plus => {
-                    self.expect(Token::Plus, "chainable_expr")?;
+                TokenData::Plus => {
+                    self.expect(TokenData::Plus, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::Plus,
@@ -771,8 +772,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::Minus => {
-                    self.expect(Token::Minus, "chainable_expr")?;
+                TokenData::Minus => {
+                    self.expect(TokenData::Minus, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::Minus,
@@ -780,8 +781,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::Multiply => {
-                    self.expect(Token::Multiply, "chainable_expr")?;
+                TokenData::Multiply => {
+                    self.expect(TokenData::Multiply, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::Multiply,
@@ -789,8 +790,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::Divide => {
-                    self.expect(Token::Divide, "chainable_expr")?;
+                TokenData::Divide => {
+                    self.expect(TokenData::Divide, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::Divide,
@@ -798,8 +799,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::LessThan => {
-                    self.expect(Token::LessThan, "chainable_expr")?;
+                TokenData::LessThan => {
+                    self.expect(TokenData::LessThan, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::LessThan,
@@ -807,8 +808,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::LessThanOrEqual => {
-                    self.expect(Token::LessThanOrEqual, "chainable_expr")?;
+                TokenData::LessThanOrEqual => {
+                    self.expect(TokenData::LessThanOrEqual, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::LessThanOrEqual,
@@ -816,8 +817,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::GreaterThan => {
-                    self.expect(Token::GreaterThan, "chainable_expr")?;
+                TokenData::GreaterThan => {
+                    self.expect(TokenData::GreaterThan, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::GreaterThan,
@@ -825,8 +826,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::GreaterThanOrEqual => {
-                    self.expect(Token::GreaterThanOrEqual, "chainable_expr")?;
+                TokenData::GreaterThanOrEqual => {
+                    self.expect(TokenData::GreaterThanOrEqual, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::GreaterThanOrEqual,
@@ -834,8 +835,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::EqualTo => {
-                    self.expect(Token::EqualTo, "chainable_expr")?;
+                TokenData::EqualTo => {
+                    self.expect(TokenData::EqualTo, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::Equal,
@@ -843,8 +844,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::NotEqualTo => {
-                    self.expect(Token::NotEqualTo, "chainable_expr")?;
+                TokenData::NotEqualTo => {
+                    self.expect(TokenData::NotEqualTo, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::NotEqual,
@@ -852,8 +853,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::LogicalAnd => {
-                    self.expect(Token::LogicalAnd, "chainable_expr")?;
+                TokenData::LogicalAnd => {
+                    self.expect(TokenData::LogicalAnd, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::And,
@@ -861,8 +862,8 @@ impl Parser {
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
-                Token::LogicalOr => {
-                    self.expect(Token::LogicalOr, "chainable_expr")?;
+                TokenData::LogicalOr => {
+                    self.expect(TokenData::LogicalOr, "chainable_expr")?;
                     let rhs = self.expression()?;
                     let bin_op = BinaryOperation {
                         op: BinaryOperator::Or,
@@ -882,15 +883,15 @@ impl Parser {
 
     fn expression_start(&mut self) -> Result<ExpressionStart, ParseError> {
         return match self.current_token() {
-            Token::If => {
+            TokenData::If => {
                 let cond_expr = self.conditional_expr()?;
                 Ok(ExpressionStart::ConditionalNode(cond_expr))
             },
-            Token::Match => {
+            TokenData::Match => {
                 let match_expr = self.match_expr()?;
                 Ok(ExpressionStart::MatchNode(match_expr))
             },
-            Token::For => {
+            TokenData::For => {
                 let loop_expr = self.loop_expr()?;
                 Ok(ExpressionStart::LoopNode(loop_expr))
             },
@@ -898,7 +899,7 @@ impl Parser {
             // right now this is defined as `[<ty>; <length]`
             // given the difficulty of parsing this, it might be better to come up with a different
             // syntax for this
-            Token::OpenSquareBracket => {
+            TokenData::OpenSquareBracket => {
                 let current = self.current;
 
                 if let Ok(arr_ty) = self.array_type_expr() {
@@ -910,35 +911,35 @@ impl Parser {
                 let arr_init = self.array_init_expr()?;
                 Ok(ExpressionStart::ArrayInitialization(arr_init))
             },
-            Token::SelfVariable => {
-                self.expect(Token::SelfVariable, "expression_start")?;
+            TokenData::SelfVariable => {
+                self.expect(TokenData::SelfVariable, "expression_start")?;
                 Ok(ExpressionStart::VariableNode(Variable::SelfVariable))
             },
-            Token::SelfType => {
-                self.expect(Token::SelfType, "expression_start")?;
+            TokenData::SelfType => {
+                self.expect(TokenData::SelfType, "expression_start")?;
                 Ok(ExpressionStart::VariableNode(Variable::SelfType))
             },
-            Token::Identifier(id) => {
+            TokenData::Identifier(id) => {
                 self.expect(IDENTIFIER, "expression_start")?;
                 Ok(ExpressionStart::VariableNode(Variable::Name(id)))
             },
-            Token::StringLit(s) => {
+            TokenData::StringLit(s) => {
                 self.expect(STRING_LIT, "expression_start")?;
                 Ok(ExpressionStart::ValueNode(Value::StringValue(s)))
             },
-            Token::CharLit(c) => {
+            TokenData::CharLit(c) => {
                 self.expect(CHAR_LIT, "expression_start")?;
                 Ok(ExpressionStart::ValueNode(Value::CharValue(c)))
             },
-            Token::BooleanLit(b) => {
+            TokenData::BooleanLit(b) => {
                 self.expect(BOOL_LIT, "expression_start")?;
                 Ok(ExpressionStart::ValueNode(Value::BooleanValue(b)))
             },
-            Token::IntegerLit(i) => {
+            TokenData::IntegerLit(i) => {
                 self.expect(INT_LIT, "expression_start")?;
                 Ok(ExpressionStart::ValueNode(Value::IntegerValue(i)))
             },
-            Token::FloatLit(f) => {
+            TokenData::FloatLit(f) => {
                 self.expect(FLOAT_LIT, "expression_start")?;
                 Ok(ExpressionStart::ValueNode(Value::FloatValue(f)))
             },
@@ -950,7 +951,7 @@ impl Parser {
     }
 
     fn field_access(&mut self) -> Result<FieldAccess, ParseError> {
-        self.expect(Token::Dot, "field_access")?;
+        self.expect(TokenData::Dot, "field_access")?;
         let id_token = self.expect(IDENTIFIER, "field_access")?;
         let id = Self::extract_identifier(&id_token).unwrap();
         Ok(FieldAccess {
@@ -959,7 +960,7 @@ impl Parser {
     }
 
     fn module_access(&mut self) -> Result<ModuleAccess, ParseError> {
-        self.expect(Token::DoubleColon, "module_access")?;
+        self.expect(TokenData::DoubleColon, "module_access")?;
         let id_token = self.expect(IDENTIFIER, "module_access")?;
         let id = Self::extract_identifier(&id_token).unwrap();
         Ok(ModuleAccess {
@@ -968,9 +969,9 @@ impl Parser {
     }
 
     fn array_access(&mut self) -> Result<ArrayAccess, ParseError> {
-        self.expect(Token::OpenSquareBracket, "array_access")?;
+        self.expect(TokenData::OpenSquareBracket, "array_access")?;
         let index_expr = self.expression()?;
-        self.expect(Token::CloseSquareBracket, "array_access")?;
+        self.expect(TokenData::CloseSquareBracket, "array_access")?;
 
         Ok(ArrayAccess {
             index_expr,
@@ -978,42 +979,42 @@ impl Parser {
     }
 
     fn object_initialization(&mut self) -> Result<ObjectInitialization, ParseError> {
-        self.expect(Token::OpenCurlyBracket, "object_initialization")?;
+        self.expect(TokenData::OpenCurlyBracket, "object_initialization")?;
 
         let mut fields = HashMap::new();
         loop {
             match self.expect(IDENTIFIER, "object_initialization") {
                 Ok(id_token) => {
                     let id = Self::extract_identifier(&id_token).unwrap();
-                    self.expect(Token::Colon, "object_initialization")?;
+                    self.expect(TokenData::Colon, "object_initialization")?;
                     let expr = self.expression()?;
-                    self.expect(Token::Comma, "object_initialization")?;
+                    self.expect(TokenData::Comma, "object_initialization")?;
                     fields.insert(id, expr);
                 },
                 Err(_) => break,
             }
         }
 
-        self.expect(Token::CloseCurlyBracket, "object_initialization")?;
+        self.expect(TokenData::CloseCurlyBracket, "object_initialization")?;
         Ok(ObjectInitialization {
             fields,
         })
     }
 
     fn function_application(&mut self) -> Result<FunctionApplication, ParseError> {
-        self.expect(Token::OpenParen, "call")?;
+        self.expect(TokenData::OpenParen, "call")?;
         let mut args = Vec::new();
 
-        match self.tokens[self.current] {
-            Token::CloseParen => (),
+        match self.current_token() {
+            TokenData::CloseParen => (),
             _ => {
                 let expr = self.expression()?;
                 args.push(expr);
                 
                 loop {
-                    match self.tokens[self.current] {
-                        Token::Comma => {
-                            self.expect(Token::Comma, "call")?;
+                    match self.current_token() {
+                        TokenData::Comma => {
+                            self.expect(TokenData::Comma, "call")?;
                             let expr = self.expression()?;
                             args.push(expr);
                         },
@@ -1023,7 +1024,7 @@ impl Parser {
             },
         }
 
-        self.expect(Token::CloseParen, "call")?;
+        self.expect(TokenData::CloseParen, "call")?;
 
         Ok(FunctionApplication {
             args,
@@ -1031,19 +1032,19 @@ impl Parser {
     }
 
     fn type_application(&mut self) -> Result<TypeApplication, ParseError> {
-        self.expect(Token::OpenDoubleAngleBracket, "type_application")?;
+        self.expect(TokenData::OpenDoubleAngleBracket, "type_application")?;
         let mut args = Vec::new();
 
-        match self.tokens[self.current] {
-            Token::CloseDoubleAngleBracket => (),
+        match self.current_token() {
+            TokenData::CloseDoubleAngleBracket => (),
             _ => {
                 let expr = self.expression()?;
                 args.push(expr);
                 
                 loop {
-                    match self.tokens[self.current] {
-                        Token::Comma => {
-                            self.expect(Token::Comma, "type_application")?;
+                    match self.current_token() {
+                        TokenData::Comma => {
+                            self.expect(TokenData::Comma, "type_application")?;
                             let expr = self.expression()?;
                             args.push(expr);
                         },
@@ -1053,7 +1054,7 @@ impl Parser {
             },
         }
 
-        self.expect(Token::CloseDoubleAngleBracket, "type_application")?;
+        self.expect(TokenData::CloseDoubleAngleBracket, "type_application")?;
 
         Ok(TypeApplication {
             args,
@@ -1065,17 +1066,17 @@ impl Parser {
         let mut else_expr = None;
 
         loop {
-            match self.expect(Token::Else, "conditional_expr") {
+            match self.expect(TokenData::Else, "conditional_expr") {
                 Ok(_) => (),
                 Err(_) => break,
             }
 
-            match self.tokens[self.current] {
-                Token::If => if_exprs.push(self.if_expr()?),
-                Token::OpenCurlyBracket => {
-                    self.expect(Token::OpenCurlyBracket, "conditional_expr")?;
+            match self.current_token() {
+                TokenData::If => if_exprs.push(self.if_expr()?),
+                TokenData::OpenCurlyBracket => {
+                    self.expect(TokenData::OpenCurlyBracket, "conditional_expr")?;
                     let block_body = self.block_body()?;
-                    self.expect(Token::CloseCurlyBracket, "conditional_expr")?;
+                    self.expect(TokenData::CloseCurlyBracket, "conditional_expr")?;
                     else_expr = Some(block_body);
                     break;
                 },
@@ -1090,11 +1091,11 @@ impl Parser {
     }
 
     fn if_expr(&mut self) -> Result<If, ParseError> {
-        self.expect(Token::If, "if_expr")?;
+        self.expect(TokenData::If, "if_expr")?;
         let condition = self.expression()?;
-        self.expect(Token::OpenCurlyBracket, "if_expr")?;
+        self.expect(TokenData::OpenCurlyBracket, "if_expr")?;
         let body = self.block_body()?;
-        self.expect(Token::CloseCurlyBracket, "if_expr")?;
+        self.expect(TokenData::CloseCurlyBracket, "if_expr")?;
 
         Ok(If {
             condition,
@@ -1103,11 +1104,11 @@ impl Parser {
     }
 
     fn match_expr(&mut self) -> Result<Match, ParseError> {
-        self.expect(Token::Match, "match_expr")?;
+        self.expect(TokenData::Match, "match_expr")?;
         let expr = self.expression()?;
-        self.expect(Token::OpenCurlyBracket, "match_expr")?;
+        self.expect(TokenData::OpenCurlyBracket, "match_expr")?;
         let patterns = self.patterns()?;
-        self.expect(Token::CloseCurlyBracket, "match_expr")?;
+        self.expect(TokenData::CloseCurlyBracket, "match_expr")?;
 
         Ok(Match {
             expr,
@@ -1130,11 +1131,11 @@ impl Parser {
 
     fn pattern(&mut self) -> Result<Pattern, ParseError> {
         let expr = self.expression()?;
-        self.expect(Token::FatArrow, "pattern")?;
-        self.expect(Token::OpenCurlyBracket, "pattern")?;
+        self.expect(TokenData::FatArrow, "pattern")?;
+        self.expect(TokenData::OpenCurlyBracket, "pattern")?;
         let body = self.block_body()?;
-        self.expect(Token::CloseCurlyBracket, "pattern")?;
-        self.expect(Token::Comma, "pattern")?;
+        self.expect(TokenData::CloseCurlyBracket, "pattern")?;
+        self.expect(TokenData::Comma, "pattern")?;
 
         Ok(Pattern {
             to_match: expr,
@@ -1143,15 +1144,15 @@ impl Parser {
     }
 
     fn loop_expr(&mut self) -> Result<Loop, ParseError> {
-        self.expect(Token::For, "loop_expr")?;
+        self.expect(TokenData::For, "loop_expr")?;
         let init = self.variable_assignment()?;
-        self.expect(Token::Semicolon, "loop_expr")?;
+        self.expect(TokenData::Semicolon, "loop_expr")?;
         let condition = self.expression()?;
-        self.expect(Token::Semicolon, "loop_expr")?;
+        self.expect(TokenData::Semicolon, "loop_expr")?;
         let step = self.statement()?;
-        self.expect(Token::OpenCurlyBracket, "loop_expr")?;
+        self.expect(TokenData::OpenCurlyBracket, "loop_expr")?;
         let body = self.block_body()?;
-        self.expect(Token::CloseCurlyBracket, "loop_expr")?;
+        self.expect(TokenData::CloseCurlyBracket, "loop_expr")?;
 
         Ok(Loop {
             init,
@@ -1162,9 +1163,9 @@ impl Parser {
     }
 
     fn array_type_expr(&mut self) -> Result<ArrayType, ParseError> {
-        self.expect(Token::OpenSquareBracket, "array_type_expr")?;
+        self.expect(TokenData::OpenSquareBracket, "array_type_expr")?;
         let ty = self.expression()?;
-        self.expect(Token::CloseSquareBracket, "array_type_expr")?;
+        self.expect(TokenData::CloseSquareBracket, "array_type_expr")?;
 
         Ok(ArrayType {
             ty,
@@ -1172,11 +1173,11 @@ impl Parser {
     }
 
     fn array_init_expr(&mut self) -> Result<ArrayInitialization, ParseError> {
-        self.expect(Token::OpenSquareBracket, "array_init_expr")?;
+        self.expect(TokenData::OpenSquareBracket, "array_init_expr")?;
         let ty = self.expression()?;
-        self.expect(Token::Semicolon, "array_init_expr")?;
+        self.expect(TokenData::Semicolon, "array_init_expr")?;
         let size = self.expression()?;
-        self.expect(Token::CloseSquareBracket, "array_init_expr")?;
+        self.expect(TokenData::CloseSquareBracket, "array_init_expr")?;
 
         Ok(ArrayInitialization {
             ty,
@@ -1185,15 +1186,15 @@ impl Parser {
     }
 
     fn variable_assignment(&mut self) -> Result<VariableAssignment, ParseError> {
-        self.expect(Token::Let, "variable_assignment")?;
+        self.expect(TokenData::Let, "variable_assignment")?;
         
         let target = self.expression()?;
 
-        self.expect(Token::Colon, "variable_assignment")?;
+        self.expect(TokenData::Colon, "variable_assignment")?;
 
         let target_type = self.expression()?;
 
-        self.expect(Token::Assignment, "variable_assignment")?;
+        self.expect(TokenData::Assignment, "variable_assignment")?;
 
         let value = self.expression()?;
 

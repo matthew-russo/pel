@@ -7,7 +7,7 @@ use std::iter::FromIterator;
 use std::str::FromStr;
 
 use crate::lexer::tokens::*;
-use crate::lexer::tokens::Token::*;
+use crate::lexer::tokens::TokenData::*;
 
 #[derive(Debug, Clone)]
 pub(crate) enum LexError {
@@ -42,10 +42,10 @@ impl Error for LexError {
 #[derive(Debug)]
 pub(crate) struct Lexer {
     input: String,
-    start: i32,
-    current: i32,
-    row: i32,
-    col: i32,
+    pub(crate) start: u32,
+    pub(crate) current: u32,
+    pub(crate) line: u32,
+    pub(crate) col: u32,
     lexing: Vec<char>,
     tokens: Vec<Token>
 }
@@ -56,7 +56,7 @@ impl Lexer {
             input: String::new(),
             start: 0,
             current: 0,
-            row: 0,
+            line: 0,
             col: 0,
             lexing: Vec::new(),
             tokens: Vec::new(),
@@ -76,10 +76,10 @@ impl Lexer {
 
         loop {
             match self._lex() {
-                Ok(Token::EOF) => {
-                    self.emit_token(Token::EOF);
+                Ok(Token { data: TokenData::EOF, .. }) => {
+                    self.emit_token(Token::from_data(&self, TokenData::EOF));
                     return Ok(self.tokens.drain(..).collect());
-                }
+                },
                 Ok(token) => self.emit_token(token),
                 Err(e) => return Err(LexError::of(e)),
             }
@@ -110,11 +110,11 @@ impl Lexer {
         }
     }
 
-    fn snapshot(&mut self) -> (i32, i32, Vec<char>) {
+    fn snapshot(&mut self) -> (u32, u32, Vec<char>) {
         return (self.start, self.current, self.lexing.clone());
     }
 
-    fn reset(&mut self, snapshot: (i32, i32, Vec<char>)) {
+    fn reset(&mut self, snapshot: (u32, u32, Vec<char>)) {
         self.start = snapshot.0;
         self.current = snapshot.1;
         self.lexing = snapshot.2;
@@ -125,7 +125,7 @@ impl Lexer {
         self.drop_current();
         
         if (self.current + 1) >= self.input.len().try_into().unwrap() {
-            return Ok(Token::EOF);
+            return Ok(Token::from_data(&self, TokenData::EOF));
         }
 
         match self.try_lex(Self::lex_separator) {
@@ -169,8 +169,8 @@ impl Lexer {
         }
 
         let current_char = self.current_char();
-        let message = format!("failed to lex at row: {:?}, col: {:?}, position: {:?}, char: {:?}",
-                              self.row,
+        let message = format!("failed to lex at line: {:?}, col: {:?}, position: {:?}, char: {:?}",
+                              self.line,
                               self.col,
                               self.current,
                               current_char);
@@ -179,28 +179,28 @@ impl Lexer {
 
     fn lex_separator(&mut self) -> Result<Token, LexError> {
         return match self.chomp() {
-            '(' => Ok(OpenParen),
-            ')' => Ok(CloseParen),
-            '{' => Ok(OpenCurlyBracket),
-            '}' => Ok(CloseCurlyBracket),
-            '[' => Ok(OpenSquareBracket),
-            ']' => Ok(CloseSquareBracket),
+            '(' => Ok(Token::from_data(&self, OpenParen)),
+            ')' => Ok(Token::from_data(&self, CloseParen)),
+            '{' => Ok(Token::from_data(&self, OpenCurlyBracket)),
+            '}' => Ok(Token::from_data(&self, CloseCurlyBracket)),
+            '[' => Ok(Token::from_data(&self, OpenSquareBracket)),
+            ']' => Ok(Token::from_data(&self, CloseSquareBracket)),
             '|' => {
                 return match self.chomp() {
                     '|' => Err(LexError::Message("could not lex separator pipe as it is part of LogicalOr token to picked up by operator lexing".to_string())),
-                    _ => Ok(Pipe),
+                    _ => Ok(Token::from_data(&self, Pipe)),
                 }
                     
             },
             '-' => {
                 return match self.chomp() {
-                    '>' => Ok(Arrow),
+                    '>' => Ok(Token::from_data(&self, Arrow)),
                     _ => Err(LexError::Message("could not lex separator".to_string()))
                 }
             },
             '=' => {
                 return match self.chomp() {
-                    '>' => Ok(FatArrow),
+                    '>' => Ok(Token::from_data(&self, FatArrow)),
                     _ => Err(LexError::Message("could not lex separator".to_string()))
                 }
             },
@@ -208,16 +208,16 @@ impl Lexer {
                 return match self.current_char() {
                     ':' => {
                         self.chomp();
-                        Ok(DoubleColon)
+                        Ok(Token::from_data(&self, DoubleColon))
                     },
                     '=' => {
                         Err(LexError::Message("could not lex separator".to_string()))
                     },
-                    _ => Ok(Colon)
+                    _ => Ok(Token::from_data(&self, Colon))
                 }
             },
-            ';' => Ok(Semicolon),
-            ',' => Ok(Comma),
+            ';' => Ok(Token::from_data(&self, Semicolon)),
+            ',' => Ok(Token::from_data(&self, Comma)),
             _ => Err(LexError::Message("could not lex separator".to_string())),
         }
     }
@@ -228,27 +228,27 @@ impl Lexer {
                 return match self.current_char() {
                     '&' => {
                         self.chomp();
-                        Ok(LogicalAnd)
+                        Ok(Token::from_data(&self, LogicalAnd))
                     },
-                    _ => Ok(ReferenceOf)
+                    _ => Ok(Token::from_data(&self, ReferenceOf))
                 }
             }
-            '*' => Ok(Multiply),
-            '/' => Ok(Divide),
-            '+' => Ok(Plus),
-            '-' => Ok(Minus),
+            '*' => Ok(Token::from_data(&self, Multiply)),
+            '/' => Ok(Token::from_data(&self, Divide)),
+            '+' => Ok(Token::from_data(&self, Plus)),
+            '-' => Ok(Token::from_data(&self, Minus)),
             '!' => {
                 return match self.current_char() {
                     '=' => {
                         self.chomp();
-                        Ok(NotEqualTo)
+                        Ok(Token::from_data(&self, NotEqualTo))
                     },
-                    _ => Ok(LogicalNot)
+                    _ => Ok(Token::from_data(&self, LogicalNot))
                 }
             }
             '|' => {
                 return match self.chomp() {
-                    '|' => Ok(LogicalOr),
+                    '|' => Ok(Token::from_data(&self, LogicalOr)),
                     _ => Err(LexError::Message("could not lex operator".to_string()))
                 }
             }
@@ -256,41 +256,41 @@ impl Lexer {
                 return match self.current_char() {
                     '<' => {
                         self.chomp();
-                        Ok(OpenDoubleAngleBracket)
+                        Ok(Token::from_data(&self, OpenDoubleAngleBracket))
                     },
                     '=' => {
                         self.chomp();
-                        Ok(LessThanOrEqual)
+                        Ok(Token::from_data(&self, LessThanOrEqual))
                     },
-                    _ => Ok(LessThan)
+                    _ => Ok(Token::from_data(&self, LessThan))
                 }
             },
             '>' => {
                 return match self.current_char() {
                     '>' => {
                         self.chomp();
-                        Ok(CloseDoubleAngleBracket)
+                        Ok(Token::from_data(&self, CloseDoubleAngleBracket))
                     },
                     '=' => {
                         self.chomp();
-                        Ok(GreaterThanOrEqual)
+                        Ok(Token::from_data(&self, GreaterThanOrEqual))
                     },
-                    _ => Ok(GreaterThan)
+                    _ => Ok(Token::from_data(&self, GreaterThan))
                 }
             },
             ':' => {
                 return match self.chomp() {
-                    '=' => Ok(Assignment),
+                    '=' => Ok(Token::from_data(&self, Assignment)),
                     _ => Err(LexError::Message("could not lex operator".to_string()))
                 }
             },
             '=' => {
                 return match self.chomp() {
-                    '=' => Ok(EqualTo),
+                    '=' => Ok(Token::from_data(&self, EqualTo)),
                     _ => Err(LexError::Message("could not lex operator".to_string()))
                 }
             },
-            '.' => Ok(Dot),
+            '.' => Ok(Token::from_data(&self, Dot)),
             _ => Err(LexError::Message("could not lex operator".to_string())),
         }
     }
@@ -300,31 +300,31 @@ impl Lexer {
         let next_word = self.chomp_while_any_of(VALID_IDENTIFIER_STARTER);
 
         match &*next_word {
-            TYPE => Ok(Type),
-            DEPENDENT => Ok(Dependent),
-            ON => Ok(On),
-            MODULE => Ok(Module),
-            CONTRACT => Ok(Contract),
-            ENUM => Ok(Enum),
-            OBJECT => Ok(Object),
-            FIELDS => Ok(Fields),
-            VARIANTS => Ok(Variants),
-            METHODS => Ok(Methods),
-            FUNCTIONS => Ok(Functions),
-            FUNC => Ok(Func),
-            IMPLEMENT => Ok(Implement),
-            MATCH => Ok(Match),
-            FOR => Ok(For),
-            IF => Ok(If),
-            ELSE => Ok(Else),
-            BREAK => Ok(Break),
-            CONTINUE => Ok(Continue),
-            SELF_TYPE => Ok(SelfType),
-            SELF_VAR => Ok(SelfVariable),
-            PUBLIC => Ok(Public),
-            RETURN => Ok(Return),
-            LET => Ok(Let),
-            USE => Ok(Use),
+            TYPE      => Ok(Token::from_data(&self, Type)),
+            DEPENDENT => Ok(Token::from_data(&self, Dependent)),
+            ON        => Ok(Token::from_data(&self, On)),
+            MODULE    => Ok(Token::from_data(&self, Module)),
+            CONTRACT  => Ok(Token::from_data(&self, Contract)),
+            ENUM      => Ok(Token::from_data(&self, Enum)),
+            OBJECT    => Ok(Token::from_data(&self, Object)),
+            FIELDS    => Ok(Token::from_data(&self, Fields)),
+            VARIANTS  => Ok(Token::from_data(&self, Variants)),
+            METHODS   => Ok(Token::from_data(&self, Methods)),
+            FUNCTIONS => Ok(Token::from_data(&self, Functions)),
+            FUNC      => Ok(Token::from_data(&self, Func)),
+            IMPLEMENT => Ok(Token::from_data(&self, Implement)),
+            MATCH     => Ok(Token::from_data(&self, Match)),
+            FOR       => Ok(Token::from_data(&self, For)),
+            IF        => Ok(Token::from_data(&self, If)),
+            ELSE      => Ok(Token::from_data(&self, Else)),
+            BREAK     => Ok(Token::from_data(&self, Break)),
+            CONTINUE  => Ok(Token::from_data(&self, Continue)),
+            SELF_TYPE => Ok(Token::from_data(&self, SelfType)),
+            SELF_VAR  => Ok(Token::from_data(&self, SelfVariable)),
+            PUBLIC    => Ok(Token::from_data(&self, Public)),
+            RETURN    => Ok(Token::from_data(&self, Return)),
+            LET       => Ok(Token::from_data(&self, Let)),
+            USE       => Ok(Token::from_data(&self, Use)),
             _ => {
                 self.start = start;
                 Err(LexError::Message("could not lex keyword".to_string()))
@@ -336,8 +336,8 @@ impl Lexer {
         let next_word = self.chomp_while_any_of(VALID_IDENTIFIER_STARTER);
 
         match &*next_word {
-            TRUE => Ok(BooleanLit(true)),
-            FALSE => Ok(BooleanLit(false)),
+            TRUE => Ok(Token::from_data(&self, BooleanLit(true))),
+            FALSE => Ok(Token::from_data(&self, BooleanLit(false))),
             _ => {
                 Err(LexError::Message("could not lex boolean lit".to_string()))
             }
@@ -353,7 +353,7 @@ impl Lexer {
 
                 // TODO -> eval char
 
-                Ok(CharLit('f'))
+                Ok(Token::from_data(&self, CharLit('f')))
             },
             _ => Err(LexError::Message("could not lex char literal".to_string()))
         }
@@ -364,7 +364,7 @@ impl Lexer {
             '"' => {
                 self.current = self.current + 1;
                 let string_lit = self.chomp_until(DOUBLE_QUOTE);
-                Ok(StringLit(string_lit))
+                Ok(Token::from_data(&self, StringLit(string_lit)))
             },
             _ => Err(LexError::Message("could not lex string literal".to_string()))
         }
@@ -379,7 +379,7 @@ impl Lexer {
                 let fractional_part = self.chomp_while_any_of(DIGITS);
                 let f32_string = format!("{}.{}", integral_part, fractional_part);
                 let f = f32::from_str(&f32_string).unwrap();
-                Ok(FloatLit(f))
+                Ok(Token::from_data(&self, FloatLit(f)))
             },
             _ => Err(LexError::Message("could not lex float literal".to_string())),
         }
@@ -390,7 +390,7 @@ impl Lexer {
             "" => Err(LexError::Message("could not lex int literal".to_string())),
             integral_part => {
                 let i = i32::from_str(&integral_part).unwrap();
-                Ok(IntegerLit(i))
+                Ok(Token::from_data(&self, IntegerLit(i)))
             }
         }
     }
@@ -404,8 +404,9 @@ impl Lexer {
         if self.lexing.is_empty() {
             return Err(LexError::Message("could not lex identifier".to_string()));
         }
-        
-        Ok(Identifier(self.lexing.iter().collect()))
+
+
+        Ok(Token::from_data(&self, Identifier(self.lexing.iter().collect())))
     }
 
     fn chomp_until(&mut self, chomp_str: &str) -> String {
@@ -465,7 +466,7 @@ impl Lexer {
         self.current += 1;
 
         if current_char == '\n' {
-            self.row += 1;
+            self.line += 1;
             self.col = 0;
         } else {
             self.col += 1;

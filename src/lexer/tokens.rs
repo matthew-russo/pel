@@ -1,7 +1,30 @@
 use std::fmt::Display;
+use std::ops::Range;
+use crate::lexer::lexer::Lexer;
 
 #[derive(Debug, Clone)]
-pub(crate) enum Token {
+pub(crate) struct Token {
+    pub(crate) file: String,
+    pub(crate) line: u32,
+    pub(crate) col_range: Range<u32>,
+    pub(crate) data: TokenData
+}
+
+impl Token {
+    pub(crate) fn from_data(lexer: &Lexer, data: TokenData) -> Self{
+        let length = lexer.current - lexer.start;
+        assert!(lexer.col >= length);
+        Self {
+            file: "unimplemented".into(),
+            line: lexer.line,
+            col_range: (lexer.col - length)..lexer.col,
+            data,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TokenData {
     // operators
     ReferenceOf,
     Divide,
@@ -77,9 +100,9 @@ pub(crate) enum Token {
     LexError(String),
 }
 
-impl Display for Token {
+impl Display for TokenData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use Token::*;
+        use TokenData::*;
 
         let message = match self {
             ReferenceOf             => "ReferenceOf".to_string(),
@@ -195,4 +218,3 @@ pub(crate) const LET          : &str = "let";
 pub(crate) const TRUE         : &str = "true";
 pub(crate) const FALSE        : &str = "false";
 pub(crate) const USE          : &str = "use";
-

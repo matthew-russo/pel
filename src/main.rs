@@ -14,6 +14,7 @@ use evaluator::evaluator::Evaluator;
 use evaluator::interpreter::Interpreter;
 
 use syntax::parse_tree::{ChainableExpression, ExpressionChain, ExpressionStart, FunctionApplication, Variable};
+use crate::utils::{LocationContext, FileLocation};
 
 fn main() {
     let src_file_arg_name = "src_file";
@@ -41,8 +42,32 @@ fn main() {
 
 fn main_func() -> ChainableExpression {
     ChainableExpression {
-        start: ExpressionStart::VariableNode(Variable::Name("main".into())),
-        chained: vec![ExpressionChain::FunctionApplicationNode(FunctionApplication{args: vec![]})],
+        location: LocationContext {
+            file: "main".to_string(),
+            start_location: FileLocation { line: 0, col: 0 },
+            end_location: FileLocation { line: 0, col: 0 }
+        },
+        start: ExpressionStart::VariableNode(
+            Variable::Name(
+                ( "main".into(), LocationContext {
+                    file: "main".to_string(),
+                    start_location: FileLocation { line: 0, col: 0 },
+                    end_location: FileLocation { line: 0, col: 0 },
+                })
+            )
+        ),
+        chained: vec![
+            ExpressionChain::FunctionApplicationNode(
+                FunctionApplication{
+                    location: LocationContext {
+                        file: "main".to_string(),
+                        start_location: FileLocation { line: 0, col: 0 },
+                        end_location: FileLocation { line: 0, col: 0 },
+                    },
+                    args: vec![]
+                }
+            )
+        ],
     }
 }
 

@@ -248,9 +248,9 @@ impl Interpreter {
         };
 
         let var_name = match var {
-            parse_tree::Variable::Name(n) => n.clone(),
-            parse_tree::Variable::SelfVariable => SELF_VAR_SYMBOL_NAME.into(),
-            parse_tree::Variable::SelfType => SELF_TYPE_SYMBOL_NAME.into(),
+            parse_tree::Variable::Name((n, _lc)) => n.clone(),
+            parse_tree::Variable::SelfVariable(_lc) => SELF_VAR_SYMBOL_NAME.into(),
+            parse_tree::Variable::SelfType(_lc) => SELF_TYPE_SYMBOL_NAME.into(),
         };
 
         let maybe_curr_def = self.current_env.read().unwrap().get_reference_by_name(&var_name);
@@ -1171,9 +1171,9 @@ impl Evaluator for Interpreter {
             LoopNode(ref loop_node) => self.visit_loop(loop_node),
             VariableNode(ref variable) => {
                 let name = match variable {
-                    parse_tree::Variable::Name(name) => name.clone(),
-                    parse_tree::Variable::SelfVariable => "self".to_string(),
-                    parse_tree::Variable::SelfType => "Self".to_string(),
+                    parse_tree::Variable::Name((name, _lc)) => name.clone(),
+                    parse_tree::Variable::SelfVariable(_lc) => "self".to_string(),
+                    parse_tree::Variable::SelfType(_lc) => "Self".to_string(),
                 };
 
                 let var_ref = match self.current_env.read().unwrap().get_reference_by_name(&name) {
@@ -1186,7 +1186,7 @@ impl Evaluator for Interpreter {
                 self.stack.push(Value::Reference(var_ref));
             }
             ValueNode(ref value) => {
-                if let parse_tree::Value::StringValue(s) = value {
+                if let parse_tree::Value::StringValue((s, _lc)) = value {
                     let str_ref = pel_utils::rust_string_to_pel_string(s, &mut self.heap);
                     self.stack.push(Value::Reference(str_ref));
                 } else {

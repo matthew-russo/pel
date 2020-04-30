@@ -5,6 +5,7 @@ use std::fmt::Display;
 use crate::lexer::tokens::*;
 use crate::syntax::parse_tree::*;
 use crate::utils;
+use crate::utils::LocationContext;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ParseError {
@@ -67,18 +68,22 @@ impl Parser {
         self.program()
     }
 
-    fn expect(&mut self, expected_token: TokenData, currently_parsing: &str) -> Result<TokenData, ParseError> {
-        let next_token = self.current_token();
+    fn expect(&mut self, expected_token: TokenData, currently_parsing: &str) -> Result<Token, ParseError> {
+        let next_token = self.tokens.get(self.current).unwrap();
 
-        if utils::discriminants_equal(&expected_token, &next_token) {
+        if utils::discriminants_equal(&expected_token, &next_token.data) {
             self.current = self.current + 1;
-            return Ok(next_token);
+            return Ok(next_token.clone());
         }
 
-        Err(ParseError::Message(format!("expected {} while parsing {} but got {} at {}", expected_token, currently_parsing, next_token, self.current)))
+        Err(ParseError::Message(format!("expected {} while parsing {} but got {} at {:?}",
+                                        expected_token,
+                                        currently_parsing,
+                                        next_token.data,
+                                        next_token.location)))
     }
 
-    fn current_token(&self) -> TokenData {
+    fn current_token_data(&self) -> TokenData {
         let token = self.tokens.get(self.current).unwrap();
         token.data.clone()
     }
@@ -94,7 +99,7 @@ impl Parser {
     fn program(&mut self) -> Result<Program, ParseError> {
         let mut declarations = Vec::new();
         loop {
-            if let TokenData::EOF = self.current_token() {
+            if let TokenData::EOF = self.current_token_data() {
                 break
             }
 
@@ -104,13 +109,20 @@ impl Parser {
             }
         }
 
+        let location = if declarations.is_empty() {
+            self.tokens[self.current].location.clone()
+        } else {
+            LocationContext::merge(&declarations.first().unwrap().location(), &declarations.last().unwrap().location())
+        };
+
         Ok(Program {
+            location,
             declarations,
         })
     }
 
     fn declaration(&mut self) -> Result<Declaration, ParseError> {
-        return match self.current_token() {
+        return match self.current_token_data() {
             TokenData::Type => {
                 let message = format!("unexpected reserved type token");
                 Err(ParseError::Message(message))
@@ -155,13 +167,13 @@ impl Parser {
        
         let mut params = Vec::new();
 
-        match self.current_token() {
+        match self.current_token_data() {
             TokenData::Identifier(id) => {
                 self.expect(IDENTIFIER, "generic_params")?;
                 params.push(id);
 
                 loop {
-                    match self.current_token() {
+                    match self.current_token_data() {
                         TokenData::CloseDoubleAngleBracket => {
                             self.expect(TokenData::CloseDoubleAngleBracket, "generic_params")?;
                             break;
@@ -169,7 +181,7 @@ impl Parser {
                         TokenData::Comma => {
                             self.expect(TokenData::Comma, "generic_params")?;
                             let id_token = self.expect(IDENTIFIER, "generic_params")?;
-                            let id = Self::extract_identifier(&id_token).unwrap();
+                            let id = Self::extract_identifier(&id_token.data).unwrap();
                             params.push(id);
                         },
                         t => {
@@ -192,7 +204,7 @@ impl Parser {
        
         let mut args = Vec::new();
 
-        match self.current_token() {
+        match self.current_token_data() {
             TokenData::CloseDoubleAngleBracket => {
                     self.expect(TokenData::CloseDoubleAngleBracket, "generic_args")?;
             },
@@ -200,7 +212,7 @@ impl Parser {
                 let expr = self.expression()?;
                 args.push(expr);
                 loop {
-                    match self.current_token() {
+                    match self.current_token_data() {
                         TokenData::CloseDoubleAngleBracket => {
                             self.expect(TokenData::CloseDoubleAngleBracket, "generic_args")?;
                             break;
@@ -223,9 +235,9 @@ impl Parser {
     }
 
     fn module_declaration(&mut self) -> Result<ModuleDeclaration, ParseError> {
-        self.expect(TokenData::Module, "module_declaration")?;
+        let start_token = self.expect(TokenData::Module, "module_declaration")?;
         let mod_name_token = self.expect(IDENTIFIER, "enum_declaration")?;
-        let mod_name = Self::extract_identifier(&mod_name_token).unwrap();
+        let mod_name = Self::extract_identifier(&mod_name_token.data).unwrap();
         
         self.expect(TokenData::OpenCurlyBracket, "module_declaration")?;
 
@@ -238,20 +250,23 @@ impl Parser {
             }
         }
 
-        self.expect(TokenData::CloseCurlyBracket, "module_declaration")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "module_declaration")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(ModuleDeclaration {
+            location,
             mod_name,
             functions,
         })
     }
 
     fn enum_declaration(&mut self) -> Result<EnumDeclaration, ParseError> {
-        self.expect(TokenData::Enum, "enum_declaration")?;
+        let start_token = self.expect(TokenData::Enum, "enum_declaration")?;
         let type_name_token = self.expect(IDENTIFIER, "enum_declaration")?;
-        let type_name = Self::extract_identifier(&type_name_token).unwrap();
+        let type_name = Self::extract_identifier(&type_name_token.data).unwrap();
 
-        let type_params = match self.current_token() {
+        let type_params = match self.current_token_data() {
             TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
@@ -262,14 +277,17 @@ impl Parser {
         self.expect(TokenData::OpenCurlyBracket, "enum_declaration")?;
         let variants = self.variants()?;
 
-        let methods = match self.current_token() {
+        let methods = match self.current_token_data() {
             TokenData::Methods => self.methods()?,
             _ => Vec::new(),
         };
 
-        self.expect(TokenData::CloseCurlyBracket, "enum_declaration")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "enum_declaration")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(EnumDeclaration {
+            location,
             type_name,
             type_params,
             variants,
@@ -278,11 +296,11 @@ impl Parser {
     }
 
     fn object_declaration(&mut self) -> Result<ObjectDeclaration, ParseError> {
-        self.expect(TokenData::Object, "object_declaration")?;
+        let start_token = self.expect(TokenData::Object, "object_declaration")?;
         let type_name_token = self.expect(IDENTIFIER, "object_declaration")?;
-        let type_name = Self::extract_identifier(&type_name_token).unwrap();
+        let type_name = Self::extract_identifier(&type_name_token.data).unwrap();
 
-        let type_params = match self.current_token() {
+        let type_params = match self.current_token_data() {
             TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
@@ -293,14 +311,17 @@ impl Parser {
         self.expect(TokenData::OpenCurlyBracket, "object_declaration")?;
         let fields = self.fields()?;
         
-        let methods = match self.current_token() {
+        let methods = match self.current_token_data() {
             TokenData::Methods => self.methods()?,
             _ => Vec::new(),
         };
 
-        self.expect(TokenData::CloseCurlyBracket, "object_declaration")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "object_declaration")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(ObjectDeclaration {
+            location,
             type_name,
             type_params,
             fields,
@@ -309,11 +330,11 @@ impl Parser {
     }
 
     fn contract_declaration(&mut self) -> Result<ContractDeclaration, ParseError> {
-        self.expect(TokenData::Contract, "contract_declaration")?;
+        let start_token = self.expect(TokenData::Contract, "contract_declaration")?;
         let type_name_token = self.expect(IDENTIFIER, "contract_declaration")?;
-        let type_name = Self::extract_identifier(&type_name_token).unwrap();
+        let type_name = Self::extract_identifier(&type_name_token.data).unwrap();
 
-        let type_params = match self.current_token() {
+        let type_params = match self.current_token_data() {
             TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
@@ -333,9 +354,12 @@ impl Parser {
             self.expect(TokenData::Semicolon, "contract_declaration")?;
         }
         
-        self.expect(TokenData::CloseCurlyBracket, "contract_declaration")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "contract_declaration")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(ContractDeclaration {
+            location,
             type_name,
             type_params, 
             functions,
@@ -343,7 +367,7 @@ impl Parser {
     }
 
     fn implementation_declaration(&mut self) -> Result<ImplementationDeclaration, ParseError> {
-        self.expect(TokenData::Implement, "implementation_declaration")?;
+        let start_token = self.expect(TokenData::Implement, "implementation_declaration")?;
         let contract = self.expression()?;
 
         self.expect(TokenData::For, "implementation_declaration")?;
@@ -360,9 +384,12 @@ impl Parser {
             }
         }
 
-        self.expect(TokenData::CloseCurlyBracket, "implementation_declaration")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "implementation_declaration")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(ImplementationDeclaration {
+            location,
             implementing_type,
             contract,
             functions,
@@ -377,9 +404,12 @@ impl Parser {
         let signature = self.function_signature()?;
         self.expect(TokenData::OpenCurlyBracket, "function_declaration")?;
         let body = self.block_body()?;
-        self.expect(TokenData::CloseCurlyBracket, "function_declaration")?;
-       
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "function_declaration")?;
+
+        let location = LocationContext::merge(&signature.location, &end_token.location);
+
         Ok(FunctionDeclaration {
+            location,
             visibility,
             signature,
             body,
@@ -387,49 +417,52 @@ impl Parser {
     }
 
     fn use_declaration(&mut self) -> Result<UseDeclaration, ParseError> {
-        self.expect(TokenData::Use, "use_declaration")?;
+        let start_token = self.expect(TokenData::Use, "use_declaration")?;
       
         let name_token = self.expect(IDENTIFIER, "use_declaration")?;
-        let name = Self::extract_identifier(&name_token).unwrap();
+        let name = Self::extract_identifier(&name_token.data).unwrap();
         let mut import_chain = vec![name];
 
         loop {
             match self.expect(TokenData::DoubleColon, "use_declaration") {
                 Ok(_) => {
                     let name_token = self.expect(IDENTIFIER, "use_declaration")?;
-                    let name = Self::extract_identifier(&name_token).unwrap();
+                    let name = Self::extract_identifier(&name_token.data).unwrap();
                     import_chain.push(name);
                 },
                 Err(_) => break
             }
         }
 
-        self.expect(TokenData::Semicolon, "use_declaration")?;
+        let end_token = self.expect(TokenData::Semicolon, "use_declaration")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(UseDeclaration {
+            location,
             import_chain,
         })
     }
 
     fn visibility(&mut self) -> Result<Visibility, ParseError> {
-        return match self.current_token() {
+        return match self.current_token_data() {
             TokenData::Public => {
                 self.expect(TokenData::Public, "visibility")?;
                 Ok(Visibility::Public)
             },
             _ => {
-                let message = format!("unable to parse visibility at {}", self.current_token());
+                let message = format!("unable to parse visibility at {}", self.current_token_data());
                 Err(ParseError::Message(message))
             }
         }
     }
 
     fn function_signature(&mut self) -> Result<FunctionSignature, ParseError> {
-        self.expect(TokenData::Func, "function_signature")?;
+        let start_token = self.expect(TokenData::Func, "function_signature")?;
         let name_token = self.expect(IDENTIFIER, "function_signature")?;
-        let name = Self::extract_identifier(&name_token).unwrap();
+        let name = Self::extract_identifier(&name_token.data).unwrap();
 
-        let type_parameters = match self.current_token() {
+        let type_parameters = match self.current_token_data() {
             TokenData::OpenDoubleAngleBracket => {
                 let generic_params = self.generic_params()?;
                 generic_params
@@ -441,13 +474,13 @@ impl Parser {
 
         let mut parameters = Vec::new();
 
-        match self.current_token() {
+        match self.current_token_data() {
             TokenData::CloseParen => (),
             _ => {
                 let param = self.function_parameter()?;
                 parameters.push(param);
                 loop {
-                    match self.current_token() {
+                    match self.current_token_data() {
                         TokenData::Comma => {
                             self.expect(TokenData::Comma, "function_signature")?;
                             let param = self.function_parameter()?;
@@ -459,9 +492,9 @@ impl Parser {
             },
         }
 
-        self.expect(TokenData::CloseParen, "function_signature")?;
+        let end_token = self.expect(TokenData::CloseParen, "function_signature")?;
 
-        let returns = match self.current_token() {
+        let returns = match self.current_token_data() {
             TokenData::Arrow => {
                 self.expect(TokenData::Arrow, "function_signature")?;
                 let expr = self.expression()?;
@@ -471,7 +504,14 @@ impl Parser {
             _ => None
         };
 
+        let location = if let Some(r) = &returns {
+            LocationContext::merge(&start_token.location, &r.location())
+        } else {
+            LocationContext::merge(&start_token.location, &end_token.location)
+        };
+
         Ok(FunctionSignature {
+            location,
             name,
             type_parameters,
             parameters,
@@ -480,7 +520,7 @@ impl Parser {
     }
 
     fn function_parameter(&mut self) -> Result<FunctionParameter, ParseError> {
-        return match self.current_token() {
+        return match self.current_token_data() {
             TokenData::SelfVariable => {
                 self.expect(TokenData::SelfVariable, "function_parameter")?;
                 Ok(FunctionParameter::SelfParam)
@@ -494,11 +534,14 @@ impl Parser {
 
     fn typed_variable_declaration(&mut self) -> Result<TypedVariableDeclaration, ParseError> {
         let name_token = self.expect(IDENTIFIER, "typed_variable_declaration")?;
-        let name = Self::extract_identifier(&name_token).unwrap();
+        let name = Self::extract_identifier(&name_token.data).unwrap();
         self.expect(TokenData::Colon, "typed_variable_declaration")?;
         let type_reference = self.expression()?;
 
+        let location = LocationContext::merge(&name_token.location, &type_reference.location());
+
         Ok(TypedVariableDeclaration {
+            location,
             name,
             type_reference,
         })
@@ -524,7 +567,7 @@ impl Parser {
 
     fn variant_declaration(&mut self) -> Result<VariantDeclaration, ParseError> {
         let name_token = self.expect(IDENTIFIER, "variant_declaration")?;
-        let name = Self::extract_identifier(&name_token).unwrap();
+        let name = Self::extract_identifier(&name_token.data).unwrap();
         
         let mut contains = None;
 
@@ -537,9 +580,12 @@ impl Parser {
             Err(_) => (),
         }
 
-        self.expect(TokenData::Comma, "variant_declaration")?;
+        let end_token = self.expect(TokenData::Comma, "variant_declaration")?;
+
+        let location = LocationContext::merge(&name_token.location, &end_token.location);
 
         Ok(VariantDeclaration {
+            location,
             name,
             contains,
         })
@@ -605,7 +651,7 @@ impl Parser {
         let mut statements = Vec::new();
 
         loop {
-            if let TokenData::CloseCurlyBracket = self.current_token() {
+            if let TokenData::CloseCurlyBracket = self.current_token_data() {
                 break;
             }
 
@@ -613,13 +659,20 @@ impl Parser {
             statements.push(stmt);
         }
 
+        let location = if statements.is_empty() {
+            self.tokens[self.current].location.clone()
+        } else {
+            LocationContext::merge(&statements.first().unwrap().location(), &statements.last().unwrap().location())
+        };
+
         Ok(BlockBody {
+            location,
             statements,
         })
     }
 
     fn statement(&mut self) -> Result<Statement, ParseError> {
-        return match self.current_token() {
+        return match self.current_token_data() {
             TokenData::Let => {
                 let assignment = self.variable_assignment()?;
                 self.expect(TokenData::Semicolon, "statement")?;
@@ -639,20 +692,25 @@ impl Parser {
     }
 
     fn return_stmt(&mut self) -> Result<Return, ParseError> {
-        self.expect(TokenData::Return, "statement")?;
+        let start_token = self.expect(TokenData::Return, "statement")?;
         let value = self.expression()?;
 
+        let location = LocationContext::merge(&start_token.location, &value.location());
+
         Ok(Return {
+            location,
             value,
         })
     }
  
     fn expression(&mut self) -> Result<Expression, ParseError> {
-        return match self.current_token() {
+        return match self.current_token_data() {
             TokenData::LogicalNot => {
-                self.expect(TokenData::LogicalNot, "expression")?;
+                let start_token = self.expect(TokenData::LogicalNot, "expression")?;
                 let expr = self.chainable_expression()?;
+                let location = LocationContext::merge(&start_token.location, &expr.location);
                 let op = UnaryOperation {
+                    location,
                     op: UnaryOperator::Not,
                     expr: expr,
                 };
@@ -670,16 +728,16 @@ impl Parser {
     }
 
     fn lambda(&mut self) -> Result<Lambda, ParseError> {
-        self.expect(TokenData::Pipe, "lambda")?;
+        let start_token = self.expect(TokenData::Pipe, "lambda")?;
        
         let mut params = Vec::new();
-        match self.current_token() {
+        match self.current_token_data() {
             TokenData::Identifier(id) => {
                 let param = self.typed_variable_declaration()?;
                 params.push(param);
 
                 loop {
-                    match self.current_token() {
+                    match self.current_token_data() {
                         TokenData::Comma => {
                             self.expect(TokenData::Comma, "lambda")?;
                             let param = self.typed_variable_declaration()?;
@@ -695,9 +753,12 @@ impl Parser {
         self.expect(TokenData::Pipe, "lambda")?;
         self.expect(TokenData::OpenCurlyBracket, "lambda")?;
         let body = self.block_body()?;
-        self.expect(TokenData::CloseCurlyBracket, "lambda")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "lambda")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(Lambda {
+            location,
             params,
             body,
         })
@@ -708,7 +769,7 @@ impl Parser {
 
         let mut chained = Vec::new();
         loop {
-            match self.current_token() {
+            match self.current_token_data() {
                 TokenData::Dot => {
                     let current = self.current;
                     if let Ok(field_access) = self.field_access() {
@@ -764,108 +825,132 @@ impl Parser {
                     }
                 },
                 TokenData::Plus => {
-                    self.expect(TokenData::Plus, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::Plus, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::Plus,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::Minus => {
-                    self.expect(TokenData::Minus, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::Minus, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::Minus,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::Multiply => {
-                    self.expect(TokenData::Multiply, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::Multiply, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::Multiply,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::Divide => {
-                    self.expect(TokenData::Divide, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::Divide, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::Divide,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::LessThan => {
-                    self.expect(TokenData::LessThan, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::LessThan, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::LessThan,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::LessThanOrEqual => {
-                    self.expect(TokenData::LessThanOrEqual, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::LessThanOrEqual, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::LessThanOrEqual,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::GreaterThan => {
-                    self.expect(TokenData::GreaterThan, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::GreaterThan, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::GreaterThan,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::GreaterThanOrEqual => {
-                    self.expect(TokenData::GreaterThanOrEqual, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::GreaterThanOrEqual, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::GreaterThanOrEqual,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::EqualTo => {
-                    self.expect(TokenData::EqualTo, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::EqualTo, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::Equal,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::NotEqualTo => {
-                    self.expect(TokenData::NotEqualTo, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::NotEqualTo, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::NotEqual,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::LogicalAnd => {
-                    self.expect(TokenData::LogicalAnd, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::LogicalAnd, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::And,
                         rhs: rhs,
                     };
                     chained.push(ExpressionChain::BinaryOperationNode(bin_op));
                 },
                 TokenData::LogicalOr => {
-                    self.expect(TokenData::LogicalOr, "chainable_expr")?;
+                    let start_token = self.expect(TokenData::LogicalOr, "chainable_expr")?;
                     let rhs = self.expression()?;
+                    let location = LocationContext::merge(&start_token.location, &rhs.location());
                     let bin_op = BinaryOperation {
+                        location,
                         op: BinaryOperator::Or,
                         rhs: rhs,
                     };
@@ -875,14 +960,21 @@ impl Parser {
             }
         }
 
+        let location = if chained.is_empty() {
+            start.location()
+        } else {
+            LocationContext::merge(&start.location(), &chained.last().unwrap().location())
+        };
+
         Ok(ChainableExpression {
+            location,
             start,
             chained,
         })
     }
 
     fn expression_start(&mut self) -> Result<ExpressionStart, ParseError> {
-        return match self.current_token() {
+        return match self.current_token_data() {
             TokenData::If => {
                 let cond_expr = self.conditional_expr()?;
                 Ok(ExpressionStart::ConditionalNode(cond_expr))
@@ -912,36 +1004,36 @@ impl Parser {
                 Ok(ExpressionStart::ArrayInitialization(arr_init))
             },
             TokenData::SelfVariable => {
-                self.expect(TokenData::SelfVariable, "expression_start")?;
-                Ok(ExpressionStart::VariableNode(Variable::SelfVariable))
+                let token = self.expect(TokenData::SelfVariable, "expression_start")?;
+                Ok(ExpressionStart::VariableNode(Variable::SelfVariable(token.location)))
             },
             TokenData::SelfType => {
-                self.expect(TokenData::SelfType, "expression_start")?;
-                Ok(ExpressionStart::VariableNode(Variable::SelfType))
+                let token = self.expect(TokenData::SelfType, "expression_start")?;
+                Ok(ExpressionStart::VariableNode(Variable::SelfType(token.location)))
             },
             TokenData::Identifier(id) => {
-                self.expect(IDENTIFIER, "expression_start")?;
-                Ok(ExpressionStart::VariableNode(Variable::Name(id)))
+                let token = self.expect(IDENTIFIER, "expression_start")?;
+                Ok(ExpressionStart::VariableNode(Variable::Name((id, token.location))))
             },
             TokenData::StringLit(s) => {
-                self.expect(STRING_LIT, "expression_start")?;
-                Ok(ExpressionStart::ValueNode(Value::StringValue(s)))
+                let token = self.expect(STRING_LIT, "expression_start")?;
+                Ok(ExpressionStart::ValueNode(Value::StringValue((s, token.location))))
             },
             TokenData::CharLit(c) => {
-                self.expect(CHAR_LIT, "expression_start")?;
-                Ok(ExpressionStart::ValueNode(Value::CharValue(c)))
+                let token = self.expect(CHAR_LIT, "expression_start")?;
+                Ok(ExpressionStart::ValueNode(Value::CharValue((c, token.location))))
             },
             TokenData::BooleanLit(b) => {
-                self.expect(BOOL_LIT, "expression_start")?;
-                Ok(ExpressionStart::ValueNode(Value::BooleanValue(b)))
+                let token = self.expect(BOOL_LIT, "expression_start")?;
+                Ok(ExpressionStart::ValueNode(Value::BooleanValue((b, token.location))))
             },
             TokenData::IntegerLit(i) => {
-                self.expect(INT_LIT, "expression_start")?;
-                Ok(ExpressionStart::ValueNode(Value::IntegerValue(i)))
+                let token = self.expect(INT_LIT, "expression_start")?;
+                Ok(ExpressionStart::ValueNode(Value::IntegerValue((i, token.location))))
             },
             TokenData::FloatLit(f) => {
-                self.expect(FLOAT_LIT, "expression_start")?;
-                Ok(ExpressionStart::ValueNode(Value::FloatValue(f)))
+                let token = self.expect(FLOAT_LIT, "expression_start")?;
+                Ok(ExpressionStart::ValueNode(Value::FloatValue((f, token.location))))
             },
             t => {
                 let message = format!("unable to parse expression_start at {}, pos: {}", t, self.current);
@@ -951,41 +1043,52 @@ impl Parser {
     }
 
     fn field_access(&mut self) -> Result<FieldAccess, ParseError> {
-        self.expect(TokenData::Dot, "field_access")?;
+        let start_token = self.expect(TokenData::Dot, "field_access")?;
         let id_token = self.expect(IDENTIFIER, "field_access")?;
-        let id = Self::extract_identifier(&id_token).unwrap();
+        let id = Self::extract_identifier(&id_token.data).unwrap();
+
+        let location = LocationContext::merge(&start_token.location, &id_token.location);
+
         Ok(FieldAccess {
+            location,
             field_name: id,
         })
     }
 
     fn module_access(&mut self) -> Result<ModuleAccess, ParseError> {
-        self.expect(TokenData::DoubleColon, "module_access")?;
+        let start_token = self.expect(TokenData::DoubleColon, "module_access")?;
         let id_token = self.expect(IDENTIFIER, "module_access")?;
-        let id = Self::extract_identifier(&id_token).unwrap();
+        let id = Self::extract_identifier(&id_token.data).unwrap();
+
+        let location = LocationContext::merge(&start_token.location, &id_token.location);
+
         Ok(ModuleAccess {
+            location,
             name: id,
         })
     }
 
     fn array_access(&mut self) -> Result<ArrayAccess, ParseError> {
-        self.expect(TokenData::OpenSquareBracket, "array_access")?;
+        let start_token = self.expect(TokenData::OpenSquareBracket, "array_access")?;
         let index_expr = self.expression()?;
-        self.expect(TokenData::CloseSquareBracket, "array_access")?;
+        let end_token = self.expect(TokenData::CloseSquareBracket, "array_access")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(ArrayAccess {
+            location,
             index_expr,
         })
     }
 
     fn object_initialization(&mut self) -> Result<ObjectInitialization, ParseError> {
-        self.expect(TokenData::OpenCurlyBracket, "object_initialization")?;
+        let start_token = self.expect(TokenData::OpenCurlyBracket, "object_initialization")?;
 
         let mut fields = HashMap::new();
         loop {
             match self.expect(IDENTIFIER, "object_initialization") {
                 Ok(id_token) => {
-                    let id = Self::extract_identifier(&id_token).unwrap();
+                    let id = Self::extract_identifier(&id_token.data).unwrap();
                     self.expect(TokenData::Colon, "object_initialization")?;
                     let expr = self.expression()?;
                     self.expect(TokenData::Comma, "object_initialization")?;
@@ -995,24 +1098,28 @@ impl Parser {
             }
         }
 
-        self.expect(TokenData::CloseCurlyBracket, "object_initialization")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "object_initialization")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
+
         Ok(ObjectInitialization {
+            location,
             fields,
         })
     }
 
     fn function_application(&mut self) -> Result<FunctionApplication, ParseError> {
-        self.expect(TokenData::OpenParen, "call")?;
+        let start_token = self.expect(TokenData::OpenParen, "call")?;
         let mut args = Vec::new();
 
-        match self.current_token() {
+        match self.current_token_data() {
             TokenData::CloseParen => (),
             _ => {
                 let expr = self.expression()?;
                 args.push(expr);
                 
                 loop {
-                    match self.current_token() {
+                    match self.current_token_data() {
                         TokenData::Comma => {
                             self.expect(TokenData::Comma, "call")?;
                             let expr = self.expression()?;
@@ -1024,25 +1131,28 @@ impl Parser {
             },
         }
 
-        self.expect(TokenData::CloseParen, "call")?;
+        let end_token = self.expect(TokenData::CloseParen, "call")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(FunctionApplication {
+            location,
             args,
         })
     }
 
     fn type_application(&mut self) -> Result<TypeApplication, ParseError> {
-        self.expect(TokenData::OpenDoubleAngleBracket, "type_application")?;
+        let start_token = self.expect(TokenData::OpenDoubleAngleBracket, "type_application")?;
         let mut args = Vec::new();
 
-        match self.current_token() {
+        match self.current_token_data() {
             TokenData::CloseDoubleAngleBracket => (),
             _ => {
                 let expr = self.expression()?;
                 args.push(expr);
                 
                 loop {
-                    match self.current_token() {
+                    match self.current_token_data() {
                         TokenData::Comma => {
                             self.expect(TokenData::Comma, "type_application")?;
                             let expr = self.expression()?;
@@ -1054,15 +1164,19 @@ impl Parser {
             },
         }
 
-        self.expect(TokenData::CloseDoubleAngleBracket, "type_application")?;
+        let end_token = self.expect(TokenData::CloseDoubleAngleBracket, "type_application")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(TypeApplication {
+            location,
             args,
         })
     }
 
     fn conditional_expr(&mut self) -> Result<Conditional, ParseError> {
-        let mut if_exprs = vec![self.if_expr()?];
+        let if_expr = self.if_expr()?;
+        let mut if_exprs = vec![if_expr];
         let mut else_expr = None;
 
         loop {
@@ -1071,7 +1185,7 @@ impl Parser {
                 Err(_) => break,
             }
 
-            match self.current_token() {
+            match self.current_token_data() {
                 TokenData::If => if_exprs.push(self.if_expr()?),
                 TokenData::OpenCurlyBracket => {
                     self.expect(TokenData::OpenCurlyBracket, "conditional_expr")?;
@@ -1083,34 +1197,49 @@ impl Parser {
                 _ => return Err(ParseError::Message("unable to parse else-if or else epxressions".to_string())),
             }
         }
-        
+
+        let end_location = if let Some(ee) = &else_expr {
+            ee.location.clone()
+        } else {
+            if_exprs.last().unwrap().location.clone()
+        };
+
+        let location = LocationContext::merge(&if_exprs.first().unwrap().location, &end_location);
+
         Ok(Conditional {
+            location,
             if_exprs,
             else_expr,
         })
     }
 
     fn if_expr(&mut self) -> Result<If, ParseError> {
-        self.expect(TokenData::If, "if_expr")?;
+        let start_token = self.expect(TokenData::If, "if_expr")?;
         let condition = self.expression()?;
         self.expect(TokenData::OpenCurlyBracket, "if_expr")?;
         let body = self.block_body()?;
-        self.expect(TokenData::CloseCurlyBracket, "if_expr")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "if_expr")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(If {
+            location,
             condition,
             body,
         })
     }
 
     fn match_expr(&mut self) -> Result<Match, ParseError> {
-        self.expect(TokenData::Match, "match_expr")?;
+        let start_token = self.expect(TokenData::Match, "match_expr")?;
         let expr = self.expression()?;
         self.expect(TokenData::OpenCurlyBracket, "match_expr")?;
         let patterns = self.patterns()?;
-        self.expect(TokenData::CloseCurlyBracket, "match_expr")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "match_expr")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(Match {
+            location,
             expr,
             patterns,
         })
@@ -1135,16 +1264,19 @@ impl Parser {
         self.expect(TokenData::OpenCurlyBracket, "pattern")?;
         let body = self.block_body()?;
         self.expect(TokenData::CloseCurlyBracket, "pattern")?;
-        self.expect(TokenData::Comma, "pattern")?;
+        let end_token = self.expect(TokenData::Comma, "pattern")?;
+
+        let location = LocationContext::merge(&expr.location(), &end_token.location);
 
         Ok(Pattern {
+            location,
             to_match: expr,
             body,
         })
     }
 
     fn loop_expr(&mut self) -> Result<Loop, ParseError> {
-        self.expect(TokenData::For, "loop_expr")?;
+        let start_token = self.expect(TokenData::For, "loop_expr")?;
         let init = self.variable_assignment()?;
         self.expect(TokenData::Semicolon, "loop_expr")?;
         let condition = self.expression()?;
@@ -1152,9 +1284,12 @@ impl Parser {
         let step = self.statement()?;
         self.expect(TokenData::OpenCurlyBracket, "loop_expr")?;
         let body = self.block_body()?;
-        self.expect(TokenData::CloseCurlyBracket, "loop_expr")?;
+        let end_token = self.expect(TokenData::CloseCurlyBracket, "loop_expr")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(Loop {
+            location,
             init,
             condition,
             step,
@@ -1163,30 +1298,36 @@ impl Parser {
     }
 
     fn array_type_expr(&mut self) -> Result<ArrayType, ParseError> {
-        self.expect(TokenData::OpenSquareBracket, "array_type_expr")?;
+        let start_token = self.expect(TokenData::OpenSquareBracket, "array_type_expr")?;
         let ty = self.expression()?;
-        self.expect(TokenData::CloseSquareBracket, "array_type_expr")?;
+        let end_token = self.expect(TokenData::CloseSquareBracket, "array_type_expr")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(ArrayType {
+            location,
             ty,
         })
     }
 
     fn array_init_expr(&mut self) -> Result<ArrayInitialization, ParseError> {
-        self.expect(TokenData::OpenSquareBracket, "array_init_expr")?;
+        let start_token = self.expect(TokenData::OpenSquareBracket, "array_init_expr")?;
         let ty = self.expression()?;
         self.expect(TokenData::Semicolon, "array_init_expr")?;
         let size = self.expression()?;
-        self.expect(TokenData::CloseSquareBracket, "array_init_expr")?;
+        let end_token = self.expect(TokenData::CloseSquareBracket, "array_init_expr")?;
+
+        let location = LocationContext::merge(&start_token.location, &end_token.location);
 
         Ok(ArrayInitialization {
+            location,
             ty,
             size,
         })
     }
 
     fn variable_assignment(&mut self) -> Result<VariableAssignment, ParseError> {
-        self.expect(TokenData::Let, "variable_assignment")?;
+        let start_token = self.expect(TokenData::Let, "variable_assignment")?;
         
         let target = self.expression()?;
 
@@ -1198,7 +1339,10 @@ impl Parser {
 
         let value = self.expression()?;
 
+        let location = LocationContext::merge(&start_token.location, &value.location());
+
         Ok(VariableAssignment {
+            location,
             target,
             target_type,
             value,

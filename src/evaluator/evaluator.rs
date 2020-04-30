@@ -393,10 +393,10 @@ impl Scalar {
 impl std::convert::From<&crate::syntax::parse_tree::Value> for Scalar {
     fn from(parse_value: &crate::syntax::parse_tree::Value) -> Self {
         match parse_value {
-            crate::syntax::parse_tree::Value::BooleanValue(b) => Scalar::Boolean(*b),
-            crate::syntax::parse_tree::Value::CharValue(c)    => Scalar::Char(*c),
-            crate::syntax::parse_tree::Value::IntegerValue(i) => Scalar::Integer(*i),
-            crate::syntax::parse_tree::Value::FloatValue(f)   => Scalar::Float(*f),
+            crate::syntax::parse_tree::Value::BooleanValue((b, _lc)) => Scalar::Boolean(*b),
+            crate::syntax::parse_tree::Value::CharValue((c, _lc))    => Scalar::Char(*c),
+            crate::syntax::parse_tree::Value::IntegerValue((i, _lc))  => Scalar::Integer(*i),
+            crate::syntax::parse_tree::Value::FloatValue((f, _lc))    => Scalar::Float(*f),
             v => unimplemented!("unknown syntax Value variant: {:?}", v),
         }
     }

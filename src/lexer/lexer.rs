@@ -41,6 +41,7 @@ impl Error for LexError {
 
 #[derive(Debug)]
 pub(crate) struct Lexer {
+    pub(crate) file: String,
     input: String,
     pub(crate) start: u32,
     pub(crate) current: u32,
@@ -53,6 +54,7 @@ pub(crate) struct Lexer {
 impl Lexer {
     pub(crate) fn new() -> Self {
         Self {
+            file: "unimplemented".into(),
             input: String::new(),
             start: 0,
             current: 0,

@@ -1,12 +1,11 @@
 use std::fmt::Display;
 use std::ops::Range;
 use crate::lexer::lexer::Lexer;
+use crate::utils::{LocationContext, FileLocation};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Token {
-    pub(crate) file: String,
-    pub(crate) line: u32,
-    pub(crate) col_range: Range<u32>,
+    pub(crate) location: LocationContext,
     pub(crate) data: TokenData
 }
 
@@ -14,10 +13,15 @@ impl Token {
     pub(crate) fn from_data(lexer: &Lexer, data: TokenData) -> Self{
         let length = lexer.current - lexer.start;
         assert!(lexer.col >= length);
+
+        let location = LocationContext {
+            file: lexer.file.clone(),
+            start_location: FileLocation { line: lexer.line, col: lexer.col - length },
+            end_location: FileLocation { line: lexer.line, col: lexer.col },
+        };
+
         Self {
-            file: "unimplemented".into(),
-            line: lexer.line,
-            col_range: (lexer.col - length)..lexer.col,
+            location,
             data,
         }
     }

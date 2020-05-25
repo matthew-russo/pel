@@ -187,6 +187,7 @@ impl Lexer {
             '}' => Ok(Token::from_data(&self, CloseCurlyBracket)),
             '[' => Ok(Token::from_data(&self, OpenSquareBracket)),
             ']' => Ok(Token::from_data(&self, CloseSquareBracket)),
+            '@' => Ok(Token::from_data(&self, AtSign)),
             '|' => {
                 return match self.chomp() {
                     '|' => Err(LexError::Message("could not lex separator pipe as it is part of LogicalOr token to picked up by operator lexing".to_string())),
@@ -256,10 +257,6 @@ impl Lexer {
             }
             '<' => {
                 return match self.current_char() {
-                    '<' => {
-                        self.chomp();
-                        Ok(Token::from_data(&self, OpenDoubleAngleBracket))
-                    },
                     '=' => {
                         self.chomp();
                         Ok(Token::from_data(&self, LessThanOrEqual))
@@ -269,10 +266,6 @@ impl Lexer {
             },
             '>' => {
                 return match self.current_char() {
-                    '>' => {
-                        self.chomp();
-                        Ok(Token::from_data(&self, CloseDoubleAngleBracket))
-                    },
                     '=' => {
                         self.chomp();
                         Ok(Token::from_data(&self, GreaterThanOrEqual))

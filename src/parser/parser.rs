@@ -121,6 +121,54 @@ impl Parser {
         })
     }
 
+// #[derive(Debug, Clone)]
+// pub(crate) struct GenericIdentifier {
+//     pub name: String,
+//     pub type_parameters: Option<Vec<Box<GenericIdentifier>>>,
+// }
+    fn generic_identifier(&mut self) -> Result<GenericIdentifier, ParseError> {
+        let name_token = self.expect(IDENTIFIER, "generic_identifier")?;
+        let name = Self::extract_identifier(&name_token.data).unwrap();
+
+        let mut type_parameters = None;
+        let mut end_token = None;
+        if let Ok(_t) = self.expect(TokenData::AtSign, "generic_identifier") {
+            self.expect(TokenData::OpenParen, "generic_identifier")?;
+            let type_params = vec![self.generic_identifier()?];
+
+            loop {
+                match self.current_token_data() {
+                    TokenData::CloseParen => {
+                        end_token = Some(self.expect(TokenData::GreaterThan, "generic_identifier")?);
+                        break;
+                    },
+                    TokenData::Comma => {
+                        self.expect(TokenData::Comma, "generic_identifier")?;
+                        type_params.push(self.generic_identifier()?);
+                    },
+                    t => {
+                        let message = format!("unexpected token: {} while parsing generic_params", t);
+                        panic!(message);
+                    }
+                }
+            }
+
+            type_parameters = Some(type_params);
+        }
+       
+        let location = if let Some(end_token) = end_token {
+            LocationContext::merge(&name_token.location, &end_token.location)
+        } else {
+            LocationContext::merge(&name_token.location, &name_token.location)
+        };
+
+        Ok(GenericIdentifier {
+            location,
+            name,
+            type_parameters
+        })
+    }
+
     fn declaration(&mut self) -> Result<Declaration, ParseError> {
         return match self.current_token_data() {
             TokenData::Type => {
@@ -162,78 +210,6 @@ impl Parser {
         };
     }
 
-    fn generic_params(&mut self) -> Result<Vec<String>, ParseError> {
-        self.expect(TokenData::OpenDoubleAngleBracket, "generic_params")?;
-       
-        let mut params = Vec::new();
-
-        match self.current_token_data() {
-            TokenData::Identifier(id) => {
-                self.expect(IDENTIFIER, "generic_params")?;
-                params.push(id);
-
-                loop {
-                    match self.current_token_data() {
-                        TokenData::CloseDoubleAngleBracket => {
-                            self.expect(TokenData::CloseDoubleAngleBracket, "generic_params")?;
-                            break;
-                        },
-                        TokenData::Comma => {
-                            self.expect(TokenData::Comma, "generic_params")?;
-                            let id_token = self.expect(IDENTIFIER, "generic_params")?;
-                            let id = Self::extract_identifier(&id_token.data).unwrap();
-                            params.push(id);
-                        },
-                        t => {
-                            let message = format!("unexpected token: {} while parsing generic_params", t);
-                            panic!(message);
-                        },
-                    }
-                }
-            },
-            _ => {
-                self.expect(TokenData::CloseDoubleAngleBracket, "generic_params")?;
-            }
-        }
-
-        Ok(params)
-    }
-
-    fn generic_args(&mut self) -> Result<Vec<Expression>, ParseError> {
-        self.expect(TokenData::OpenDoubleAngleBracket, "generic_args")?;
-       
-        let mut args = Vec::new();
-
-        match self.current_token_data() {
-            TokenData::CloseDoubleAngleBracket => {
-                    self.expect(TokenData::CloseDoubleAngleBracket, "generic_args")?;
-            },
-            _ => {
-                let expr = self.expression()?;
-                args.push(expr);
-                loop {
-                    match self.current_token_data() {
-                        TokenData::CloseDoubleAngleBracket => {
-                            self.expect(TokenData::CloseDoubleAngleBracket, "generic_args")?;
-                            break;
-                        },
-                        TokenData::Comma => {
-                            self.expect(TokenData::Comma, "generic_args")?;
-                            let expr = self.expression()?;
-                            args.push(expr);
-                        },
-                        t => {
-                            let message = format!("unexpected token: {} while parsing generic_args", t);
-                            panic!(message);
-                        },
-                    }
-                }
-            }
-        }
-
-        Ok(args)
-    }
-
     fn module_declaration(&mut self) -> Result<ModuleDeclaration, ParseError> {
         let start_token = self.expect(TokenData::Module, "module_declaration")?;
         let mod_name_token = self.expect(IDENTIFIER, "enum_declaration")?;
@@ -263,17 +239,7 @@ impl Parser {
 
     fn enum_declaration(&mut self) -> Result<EnumDeclaration, ParseError> {
         let start_token = self.expect(TokenData::Enum, "enum_declaration")?;
-        let type_name_token = self.expect(IDENTIFIER, "enum_declaration")?;
-        let type_name = Self::extract_identifier(&type_name_token.data).unwrap();
-
-        let type_params = match self.current_token_data() {
-            TokenData::OpenDoubleAngleBracket => {
-                let generic_params = self.generic_params()?;
-                generic_params
-            },
-            _ => Vec::new(),
-        };
-        
+        let name = self.generic_identifier()?;
         self.expect(TokenData::OpenCurlyBracket, "enum_declaration")?;
         let variants = self.variants()?;
 
@@ -288,8 +254,7 @@ impl Parser {
 
         Ok(EnumDeclaration {
             location,
-            type_name,
-            type_params,
+            name,
             variants,
             methods,
         })
@@ -297,17 +262,7 @@ impl Parser {
 
     fn object_declaration(&mut self) -> Result<ObjectDeclaration, ParseError> {
         let start_token = self.expect(TokenData::Object, "object_declaration")?;
-        let type_name_token = self.expect(IDENTIFIER, "object_declaration")?;
-        let type_name = Self::extract_identifier(&type_name_token.data).unwrap();
-
-        let type_params = match self.current_token_data() {
-            TokenData::OpenDoubleAngleBracket => {
-                let generic_params = self.generic_params()?;
-                generic_params
-            },
-            _ => Vec::new(),
-        };
-
+        let name = self.generic_identifier()?;
         self.expect(TokenData::OpenCurlyBracket, "object_declaration")?;
         let fields = self.fields()?;
         
@@ -322,8 +277,7 @@ impl Parser {
 
         Ok(ObjectDeclaration {
             location,
-            type_name,
-            type_params,
+            name,
             fields,
             methods,
         })
@@ -331,17 +285,7 @@ impl Parser {
 
     fn contract_declaration(&mut self) -> Result<ContractDeclaration, ParseError> {
         let start_token = self.expect(TokenData::Contract, "contract_declaration")?;
-        let type_name_token = self.expect(IDENTIFIER, "contract_declaration")?;
-        let type_name = Self::extract_identifier(&type_name_token.data).unwrap();
-
-        let type_params = match self.current_token_data() {
-            TokenData::OpenDoubleAngleBracket => {
-                let generic_params = self.generic_params()?;
-                generic_params
-            },
-            _ => Vec::new(),
-        };
-
+        let name = self.generic_identifier()?;
         self.expect(TokenData::OpenCurlyBracket, "contract_declaration")?;
 
         let mut functions = Vec::new();
@@ -360,18 +304,17 @@ impl Parser {
 
         Ok(ContractDeclaration {
             location,
-            type_name,
-            type_params, 
+            name,
             functions,
         })
     }
 
     fn implementation_declaration(&mut self) -> Result<ImplementationDeclaration, ParseError> {
         let start_token = self.expect(TokenData::Implement, "implementation_declaration")?;
-        let contract = self.expression()?;
+        let contract = self.generic_identifier()?;
 
         self.expect(TokenData::For, "implementation_declaration")?;
-        let implementing_type = self.expression()?;
+        let implementing_type = self.generic_identifier()?;
 
         self.expect(TokenData::OpenCurlyBracket, "implementation_declaration")?;
 
@@ -450,8 +393,8 @@ impl Parser {
                 self.expect(TokenData::Public, "visibility")?;
                 Ok(Visibility::Public)
             },
-            _ => {
-                let message = format!("unable to parse visibility at {}", self.current_token_data());
+            t => {
+                let message = format!("unable to parse visibility at {}", t);
                 Err(ParseError::Message(message))
             }
         }
@@ -459,17 +402,7 @@ impl Parser {
 
     fn function_signature(&mut self) -> Result<FunctionSignature, ParseError> {
         let start_token = self.expect(TokenData::Func, "function_signature")?;
-        let name_token = self.expect(IDENTIFIER, "function_signature")?;
-        let name = Self::extract_identifier(&name_token.data).unwrap();
-
-        let type_parameters = match self.current_token_data() {
-            TokenData::OpenDoubleAngleBracket => {
-                let generic_params = self.generic_params()?;
-                generic_params
-            },
-            _ => Vec::new(),
-        };
-
+        let name = self.generic_identifier()?;
         self.expect(TokenData::OpenParen, "function_signature")?;
 
         let mut parameters = Vec::new();
@@ -497,15 +430,13 @@ impl Parser {
         let returns = match self.current_token_data() {
             TokenData::Arrow => {
                 self.expect(TokenData::Arrow, "function_signature")?;
-                let expr = self.expression()?;
-                self.expect(TokenData::Semicolon, "function_signature")?;
-                Some(expr)
+                Some(self.generic_identifier()?)
             },
             _ => None
         };
 
         let location = if let Some(r) = &returns {
-            LocationContext::merge(&start_token.location, &r.location())
+            LocationContext::merge(&start_token.location, &r.location)
         } else {
             LocationContext::merge(&start_token.location, &end_token.location)
         };
@@ -513,7 +444,6 @@ impl Parser {
         Ok(FunctionSignature {
             location,
             name,
-            type_parameters,
             parameters,
             returns,
         })
@@ -536,9 +466,9 @@ impl Parser {
         let name_token = self.expect(IDENTIFIER, "typed_variable_declaration")?;
         let name = Self::extract_identifier(&name_token.data).unwrap();
         self.expect(TokenData::Colon, "typed_variable_declaration")?;
-        let type_reference = self.expression()?;
+        let type_reference = self.generic_identifier()?;
 
-        let location = LocationContext::merge(&name_token.location, &type_reference.location());
+        let location = LocationContext::merge(&name_token.location, &type_reference.location);
 
         Ok(TypedVariableDeclaration {
             location,
@@ -573,7 +503,7 @@ impl Parser {
 
         match self.expect(TokenData::OpenParen, "variant_declaration") {
             Ok(_) => {
-                let type_reference = self.expression()?;
+                let type_reference = self.generic_identifier()?;
                 self.expect(TokenData::CloseParen, "variant_declaration")?;
                 contains = Some(type_reference)
             },
@@ -815,7 +745,7 @@ impl Parser {
                         break;
                     }
                 },
-                TokenData::OpenDoubleAngleBracket => {
+                TokenData::AtSign => {
                     let current = self.current;
                     if let Ok(type_application) = self.type_application() {
                         chained.push(ExpressionChain::TypeApplicationNode(type_application));
@@ -1142,11 +1072,12 @@ impl Parser {
     }
 
     fn type_application(&mut self) -> Result<TypeApplication, ParseError> {
-        let start_token = self.expect(TokenData::OpenDoubleAngleBracket, "type_application")?;
+        let start_token = self.expect(TokenData::AtSign, "type_application")?;
+        self.expect(TokenData::OpenParen, "type_application")?;
         let mut args = Vec::new();
 
         match self.current_token_data() {
-            TokenData::CloseDoubleAngleBracket => (),
+            TokenData::CloseParen => (),
             _ => {
                 let expr = self.expression()?;
                 args.push(expr);
@@ -1164,7 +1095,7 @@ impl Parser {
             },
         }
 
-        let end_token = self.expect(TokenData::CloseDoubleAngleBracket, "type_application")?;
+        let end_token = self.expect(TokenData::CloseParen, "type_application")?;
 
         let location = LocationContext::merge(&start_token.location, &end_token.location);
 
@@ -1333,7 +1264,7 @@ impl Parser {
 
         self.expect(TokenData::Colon, "variable_assignment")?;
 
-        let target_type = self.expression()?;
+        let target_type = self.generic_identifier()?;
 
         self.expect(TokenData::Assignment, "variable_assignment")?;
 

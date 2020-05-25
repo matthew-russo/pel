@@ -1536,6 +1536,7 @@ impl Evaluator for Interpreter {
         for (field_name, expected_ty_ref) in obj.read().unwrap().fields.iter() {
             let mut expected_ty = self.heap.load_type_reference(expected_ty_ref.to_heap_ref().unwrap().address).unwrap();
 
+            println!("EXPECTED TY: {:?}", expected_ty);
             expected_ty = resolve_kind_hash(&expected_ty, &obj_instance.read().unwrap().environment, &self.heap);
 
             if !obj_init.fields.contains_key(field_name) {

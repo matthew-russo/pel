@@ -641,6 +641,28 @@ impl ScalarType {
 
 pub(crate) type KindHash = String;
 
+pub(crate) fn kind_hash_from_generic_id(generic_id: &GenericIdentifier, env: &Environment, heap: &Heap) -> KindHash {
+    match env.get_reference_by_name(&generic_id.name) {
+        Some(reference) => {
+            let heap_ref = reference.to_heap_ref().unwrap();
+            let base = heap.load_type_reference(heap_ref.address).unwrap();
+
+            if let Some(type_params) = generic_id.type_parameters {
+                let type_arg_kind_hash = type_params
+                    .iter()
+                    .map(|g_id| kind_hash_from_generic_id(g_id, env, heap))
+                    .collect::<Vec<String>>()
+                    .join(",");
+
+                format!("{}<{}>", base, type_arg_kind_hash)
+            } else {
+                base
+            }
+        },
+        None => panic!("unknown type specified in GenericIdentifier: {} at {:?}", generic_id.name, generic_id.location),
+    }
+}
+
 pub(crate) const KIND_KIND_HASH_STR: &str = "kind";
 
 pub(crate) trait KindHashable {
@@ -674,7 +696,7 @@ impl KindHashable for Object {
                 .collect::<Vec<String>>()
                 .join(",");
    
-            format!("{}<<{}>>", base, type_arg_kind_hash)
+            format!("{}<{}>", base, type_arg_kind_hash)
         } else {
             base
         }
@@ -692,7 +714,7 @@ impl KindHashable for Enum {
                 .collect::<Vec<String>>()
                 .join(",");
    
-            format!("{}<<{}>>", base, type_arg_kind_hash)
+            format!("{}<{}>", base, type_arg_kind_hash)
         } else {
             base
         }
@@ -710,7 +732,7 @@ impl KindHashable for Contract {
                 .collect::<Vec<KindHash>>()
                 .join(",");
    
-            format!("{}<<{}>>", base, type_arg_kind_hash)
+            format!("{}<{}>", base, type_arg_kind_hash)
         } else {
             base
         }
@@ -933,7 +955,7 @@ pub(crate) struct Enum {
     pub parent: KindHash,
     pub name: String,
     pub type_arguments: Vec<(String, KindHash)>,
-    pub variant_tys: HashMap<String, Option<Reference>>, // name of variant and optionally a reference to the type it contains
+    pub variant_tys: HashMap<String, Option<KindHash>>, // name of variant and optionally the KindHash of the type it contains
     pub variant_values: HashMap<String, Reference>,
     pub methods: HashMap<String, Reference>,
     pub vtables: HashMap<KindHash, VTableId>, // id of the contract -> impls of functions
@@ -1023,48 +1045,11 @@ impl KindHashable for FunctionSignature {
                 .collect::<Vec<KindHash>>()
                 .join(",");
    
-            format!("{}<<{}>>", base, type_arg_kind_hash)
+            format!("{}<{}>", base, type_arg_kind_hash)
         } else {
             base
         }
     }
-
-    // fn kind_hash(&self, table: &KindTable, heap: &Heap) -> String {
-    //     let base_hash = [KindHash::clone(&self.parent), self.name.clone()].join("::");
-
-    //     let type_params = if !self.type_arguments.is_empty() {
-    //         let tp_str = self.type_arguments
-    //             .iter()
-    //             .map(|(n, kh)| KindHash::clone(kh))
-    //             .collect::<Vec<KindHash>>()
-    //             .join(", ");
-    //         format!("<{}>", tp_str)
-    //     } else {
-    //         String::new()
-    //     };
-
-    //     let params = if !self.parameters.is_empty() {
-    //         self.parameters
-    //             .iter()
-    //             .map(|(n, r)| {
-    //                 heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap()
-    //             })
-    //             .collect::<Vec<KindHash>>()
-    //             .join(", ")
-    //     } else {
-    //         String::new()
-    //     };
-
-    //     let returns = match self.returns {
-    //         Some(ref r) => {
-    //             let kh = heap.load_type_reference(r.to_heap_ref().unwrap().address).unwrap();
-    //             format!(" -> {}", kh)
-    //         },
-    //         None => String::new(),
-    //     };
-    //     
-    //     format!("{}{}({}){}", base_hash, type_params, params, returns)
-    // }
 }
 
 #[derive(Clone, Debug)]

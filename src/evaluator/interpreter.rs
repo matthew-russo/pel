@@ -22,6 +22,7 @@ use crate::evaluator::evaluator::{
     KindTable,
     Kind,
     KindHash,
+    kind_hash_from_generic_id,
     KindHashable,
     KIND_KIND_HASH_STR,
     Module,
@@ -594,7 +595,7 @@ impl Evaluator for Interpreter {
 
         let mut enu = Enum {
             parent: KindHash::clone(&self.current_module),
-            name: String::clone(&enum_decl.type_name),
+            name: String::clone(&enum_decl.name.name),
             type_arguments: Vec::new(),
             variant_tys: HashMap::new(),
             variant_values: HashMap::new(),
@@ -604,28 +605,13 @@ impl Evaluator for Interpreter {
 
         let enu_kind_hash = enu.kind_hash(&self.kind_table, &self.heap);
        
-        enu.type_arguments = self.generate_type_holes(&enu_kind_hash, &enum_decl.type_params);
+        enu.type_arguments = self.generate_type_holes(&enu_kind_hash, &enum_decl.name.type_parameters);
         
         enu.variant_tys = enum_decl.variants
             .iter()
             .map(|vd| {
-                let contains = if let Some(expr) = &vd.contains {
-                    // type check that last_local is a type/kind
-                    self.visit_expression(&expr);
-                    let val = self.stack.pop().unwrap();
-                    match val {
-                        Value::Reference(r) => {
-                            let hr = r.to_heap_ref().unwrap();
-                            if hr.ty != KindHash::from(KIND_KIND_HASH_STR) &&
-                                !hr.ty.contains("{") {
-                                panic!("reference must be pointing to a kind but is actually: {}", hr.ty);
-                            }
-                            Some(Reference::clone(&r))
-                        },
-                        v => {
-                            panic!("variant type must be a kind but got {:?}", v);
-                        }
-                    }
+                let contains = if let Some(generic_id) = &vd.contains {
+                    Some(kind_hash_from_generic_id(generic_id, &self.current_env.read().unwrap().deref(), &self.heap))
                 } else {
                     None
                 };
@@ -634,7 +620,8 @@ impl Evaluator for Interpreter {
             })
             .collect();
 
-        enu.variant_values = enum_decl.variants
+        enu.variant_values = enum_decl
+            .variants
             .iter()
             .map(|vd| {
                 if vd.contains.is_none() {
@@ -762,7 +749,7 @@ impl Evaluator for Interpreter {
 
         let mut obj = Object {
             parent: KindHash::clone(&self.current_module),
-            name: obj_decl.type_name.clone(),
+            name: obj_decl.name.name.clone(),
             type_arguments: Vec::new(),
             fields: HashMap::new(),
             methods: HashMap::new(),
@@ -777,10 +764,9 @@ impl Evaluator for Interpreter {
             .fields
             .iter()
             .map(|tvd| {
-                self.visit_expression(&tvd.type_reference);
-                // type check that last_local is a type/kind
-                let type_ref = self.stack.pop().unwrap().to_ref().unwrap();
-                (tvd.name.clone(), type_ref)
+                let kh = kind_hash_from_generic_id(&tvd.type_reference, &self.current_env.read().unwrap().deref(), &self.heap);
+                // TODO -> need to  change this from a KindHash to a Reference
+                (tvd.name.clone(), kh)
             })
             .collect();
         
@@ -905,7 +891,10 @@ impl Evaluator for Interpreter {
 
         let contract = self.kind_table.load(&contract_kind_hash).unwrap();
         let required_functions_by_name: HashMap<String, Arc<RwLock<FunctionSignature>>> = if let Kind::Contract(c) = contract {
-            c.read().unwrap().required_functions
+            c
+                .read()
+                .unwrap()
+                .required_functions
                 .iter()
                 .map(|kind_hash| {
                     let req_func = self.kind_table.load(kind_hash).unwrap();

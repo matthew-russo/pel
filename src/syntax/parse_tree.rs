@@ -11,7 +11,7 @@ pub(crate) struct Program {
 pub(crate) struct GenericIdentifier {
     pub location: LocationContext,
     pub name: String,
-    pub type_parameters: Option<Vec<GenericIdentifier>>,
+    pub type_parameters: Vec<GenericIdentifier>,
 }
 
 #[derive(Debug, Clone)]

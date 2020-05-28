@@ -121,20 +121,15 @@ impl Parser {
         })
     }
 
-// #[derive(Debug, Clone)]
-// pub(crate) struct GenericIdentifier {
-//     pub name: String,
-//     pub type_parameters: Option<Vec<Box<GenericIdentifier>>>,
-// }
     fn generic_identifier(&mut self) -> Result<GenericIdentifier, ParseError> {
         let name_token = self.expect(IDENTIFIER, "generic_identifier")?;
         let name = Self::extract_identifier(&name_token.data).unwrap();
 
-        let mut type_parameters = None;
+        let mut type_parameters = Vec::new();
         let mut end_token = None;
         if let Ok(_t) = self.expect(TokenData::AtSign, "generic_identifier") {
             self.expect(TokenData::OpenParen, "generic_identifier")?;
-            let type_params = vec![self.generic_identifier()?];
+            type_parameters.push(self.generic_identifier()?);
 
             loop {
                 match self.current_token_data() {
@@ -144,7 +139,7 @@ impl Parser {
                     },
                     TokenData::Comma => {
                         self.expect(TokenData::Comma, "generic_identifier")?;
-                        type_params.push(self.generic_identifier()?);
+                        type_parameters.push(self.generic_identifier()?);
                     },
                     t => {
                         let message = format!("unexpected token: {} while parsing generic_params", t);
@@ -152,8 +147,6 @@ impl Parser {
                     }
                 }
             }
-
-            type_parameters = Some(type_params);
         }
        
         let location = if let Some(end_token) = end_token {

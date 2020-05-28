@@ -207,12 +207,22 @@ impl Interpreter {
         None
     }
 
-    fn generate_type_holes(&mut self, context: &KindHash, type_params: &Vec<String>) -> Vec<(String, KindHash)> {
+    // TODO -> move this constraint to the parser and add a new syntax node
+    // TODO -> There should be a GenericDeclaration and GenericIdentifier
+    //
+    // when generating type holes, you cannot have complex generic identifiers
+    // ie. when declaring a type, you can only have A<T>.
+    // where T may be specialized further as a generic type when specializing
+    // the generic type.
+    // ie. let myA: A<Option<String>> = initA();
+    // but it is impossible to have a declaration of A as:
+    // struct A<Option<T>> { }
+    fn generate_type_holes(&mut self, context: &KindHash, type_params: &Vec<parse_tree::GenericIdentifier>) -> Vec<(String, KindHash)> {
         type_params
             .iter()
-            .map(|type_param_name| {
-                // let type_hole = KindHash::from(format!("{}{{{}}}", context, type_param_name));
-                let type_hole = KindHash::from(format!("{{{}}}", type_param_name));
+            .map(|generic_id| {
+                let type_hole = KindHash::from(format!("{{{}}}", generic_id.name));
+
                 let address = self.heap.alloc();
                 let item = Item::TypeReference(KindHash::clone(&type_hole));
                 self.heap.store(address, item);
@@ -224,8 +234,8 @@ impl Interpreter {
                         size: 0,
                     }
                 );
-                self.current_env.write().unwrap().define(type_param_name.clone(), reference);
-                (type_param_name.clone(), type_hole)
+                self.current_env.write().unwrap().define(generic_id.name.clone(), reference);
+                (generic_id.name.clone(), type_hole)
             })
             .collect()
     }
@@ -726,9 +736,9 @@ impl Evaluator for Interpreter {
                 let func_val = self.current_env
                     .read()
                     .unwrap()
-                    .get_reference_by_name(&fd.signature.name)
+                    .get_reference_by_name(&fd.signature.name.name)
                     .unwrap();
-                (fd.signature.name.clone(), func_val)
+                (fd.signature.name.name.clone(), func_val)
             })
             .collect();
 
@@ -740,7 +750,7 @@ impl Evaluator for Interpreter {
         self.current_env
             .write()
             .unwrap()
-            .define(enum_decl.type_name.clone(), reference_to_enum);
+            .define(enum_decl.name.name.clone(), reference_to_enum);
     }
 
     fn visit_object_declaration(&mut self, obj_decl: &parse_tree::ObjectDeclaration) {
@@ -757,7 +767,7 @@ impl Evaluator for Interpreter {
         };
 
         let obj_kind_hash = obj.kind_hash(&self.kind_table, &self.heap);
-        obj.type_arguments = self.generate_type_holes(&obj_kind_hash, &obj_decl.type_params);
+        obj.type_arguments = self.generate_type_holes(&obj_kind_hash, &obj_decl.name.type_parameters);
         let obj_kind_hash = obj.kind_hash(&self.kind_table, &self.heap);
 
         obj.fields = obj_decl
@@ -779,8 +789,8 @@ impl Evaluator for Interpreter {
             .map(|fd| {
                 self.stack.push(Value::Reference(Reference::clone(&reference_to_obj)));
                 self.visit_function_declaration(fd);
-                let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fd.signature.name).unwrap();
-                (fd.signature.name.clone(), Reference::clone(&func_ref))
+                let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fd.signature.name.name).unwrap();
+                (fd.signature.name.name.clone(), Reference::clone(&func_ref))
             })
             .collect();
 
@@ -792,7 +802,7 @@ impl Evaluator for Interpreter {
         self.current_env
             .write()
             .unwrap()
-            .define(obj_decl.type_name.clone(), reference_to_obj);
+            .define(obj_decl.name.name.clone(), reference_to_obj);
     }
 
     fn visit_contract_declaration(&mut self, contract_decl: &parse_tree::ContractDeclaration) {
@@ -801,14 +811,14 @@ impl Evaluator for Interpreter {
 
         let mut contract = Contract {
             parent: KindHash::clone(&self.current_module),
-            name: contract_decl.type_name.clone(),
+            name: contract_decl.name.name.clone(),
             type_arguments: Vec::new(),
             required_functions: Vec::new(),
         };
 
         let contract_kind_hash = contract.kind_hash(&self.kind_table, &self.heap);
 
-        contract.type_arguments = self.generate_type_holes(&contract_kind_hash, &contract_decl.type_params);
+        contract.type_arguments = self.generate_type_holes(&contract_kind_hash, &contract_decl.name.type_parameters);
 
         self.kind_table.create(&self.heap, Kind::Contract(Arc::new(RwLock::new(contract))));
 
@@ -820,7 +830,7 @@ impl Evaluator for Interpreter {
                 .map(|fs| {
                     self.stack.push(Value::Reference(Reference::clone(&reference_to_contract)));
                     self.visit_function_signature(&fs);
-                    let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fs.name).unwrap();
+                    let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fs.name.name).unwrap();
                     KindHash::clone(&func_ref.to_heap_ref().unwrap().ty)
                 })
                 .collect();
@@ -833,7 +843,7 @@ impl Evaluator for Interpreter {
         self.current_env
             .write()
             .unwrap()
-            .define(contract_decl.type_name.clone(), reference_to_contract);
+            .define(contract_decl.name.name.clone(), reference_to_contract);
     }
 
     fn visit_implementation_declaration(&mut self, impl_decl: &parse_tree::ImplementationDeclaration) {

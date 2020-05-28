@@ -647,8 +647,9 @@ pub(crate) fn kind_hash_from_generic_id(generic_id: &GenericIdentifier, env: &En
             let heap_ref = reference.to_heap_ref().unwrap();
             let base = heap.load_type_reference(heap_ref.address).unwrap();
 
-            if let Some(type_params) = generic_id.type_parameters {
-                let type_arg_kind_hash = type_params
+            if generic_id.type_parameters.is_empty() {
+                let type_arg_kind_hash = generic_id
+                    .type_parameters
                     .iter()
                     .map(|g_id| kind_hash_from_generic_id(g_id, env, heap))
                     .collect::<Vec<String>>()

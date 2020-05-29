@@ -850,17 +850,12 @@ impl Evaluator for Interpreter {
         let local_env = Environment::from_parent(&self.current_env);
         self.current_env = Arc::new(RwLock::new(local_env));
 
-        self.visit_expression(&impl_decl.implementing_type);
-        let implementor_type_ref = self.stack.pop().unwrap().to_ref().unwrap();
+        let implementor_type_ref = self.current_env.read().unwrap().get_reference_by_name(&impl_decl.implementing_type.name).unwrap();
         let implementor_type_heap_ref = implementor_type_ref.to_heap_ref().unwrap();
-        if implementor_type_heap_ref.ty != KindHash::from(KIND_KIND_HASH_STR) {
-            panic!("implementor type must be a reference to a kind but got {}", implementor_type_heap_ref.ty);
-        }
         let implementor_kind_hash = self.heap.load_type_reference(implementor_type_heap_ref.address).unwrap();
         self.current_env.write().unwrap().define(String::from(SELF_TYPE_SYMBOL_NAME), Reference::clone(&implementor_type_ref));
 
-        self.visit_expression(&impl_decl.contract);
-        let contract_type_ref = self.stack.pop().unwrap().to_ref().unwrap();
+        let contract_type_ref = self.current_env.read().unwrap().get_reference_by_name(&impl_decl.contract.name).unwrap();
         let contract_type_heap_ref = contract_type_ref.to_heap_ref().unwrap();
         if contract_type_heap_ref.ty != KindHash::from(KIND_KIND_HASH_STR) {
             panic!("contract type type must be a reference to a kind but got {}", implementor_type_heap_ref.ty);
@@ -925,11 +920,11 @@ impl Evaluator for Interpreter {
             .map(|fd| {
                 self.stack.push(Value::Reference(Reference::create_type_reference(&implementor_kind_hash, &mut self.heap)));
                 self.visit_function_declaration(fd);
-                let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fd.signature.name).unwrap();
+                let func_ref = self.current_env.read().unwrap().get_reference_by_name(&fd.signature.name.name).unwrap();
                
                 // TODO -> need to define in env?
                
-                (fd.signature.name.clone(), Reference::clone(&func_ref))
+                (fd.signature.name.name.clone(), Reference::clone(&func_ref))
             })
             .collect();
 
@@ -1016,7 +1011,7 @@ impl Evaluator for Interpreter {
         let func_sig_ref = self.current_env
             .read()
             .unwrap()
-            .get_reference_by_name(&func_decl.signature.name)
+            .get_reference_by_name(&func_decl.signature.name.name)
             .unwrap();
 
         let func_sig_heap_ref = func_sig_ref
@@ -1035,7 +1030,7 @@ impl Evaluator for Interpreter {
 
         let mut func_sig = FunctionSignature {
             parent: KindHash::clone(&self.current_module),
-            name: func_sig_syntax.name.clone(),
+            name: func_sig_syntax.name.name.clone(),
             type_arguments: Vec::new(),
             parameters: Vec::new(),
             environment: Arc::clone(&self.current_env),
@@ -1044,7 +1039,7 @@ impl Evaluator for Interpreter {
         };
 
         let func_sig_kind_hash = func_sig.kind_hash(&self.kind_table, &self.heap);
-        func_sig.type_arguments = self.generate_type_holes(&func_sig_kind_hash, &func_sig_syntax.type_parameters);
+        func_sig.type_arguments = self.generate_type_holes(&func_sig_kind_hash, &func_sig_syntax.name.type_parameters);
 
         let mut parameters = Vec::new();
         for param in func_sig_syntax.parameters.iter() {
@@ -1055,13 +1050,13 @@ impl Evaluator for Interpreter {
                     (SELF_VAR_SYMBOL_NAME.into(), param.to_ref().unwrap())
                 },
                 parse_tree::FunctionParameter::TypedVariableDeclarationParam(tvd) => {
-                    self.visit_expression(&tvd.type_reference);
                     // I dont know why this is working. I'm assuming I'm not properly setting the
                     // type of other type reference to be "kind"
                     // and then later I dont actually load the type reference
                     // because i need a way to distinguish passing a type as an argument and
                     // passing the type of the argument?
-                    let param_ty_ref = self.stack.pop().unwrap().to_ref().unwrap();
+                    let param_ty_ref = self.current_env.read().unwrap().get_reference_by_name(&tvd.type_reference.name).unwrap();
+                    // TODO -> need to apply types to OG type
                     (tvd.name.clone(), param_ty_ref)
                 }
             };
@@ -1071,9 +1066,8 @@ impl Evaluator for Interpreter {
         func_sig.parameters = parameters;
 
         func_sig.returns = match func_sig_syntax.returns {
-            Some(ref expr) => {
-                self.visit_expression(&expr);
-                let return_ty_ref = Reference::create_type_reference(&self.stack.pop().unwrap().get_ty(), &mut self.heap);
+            Some(ref ty) => {
+                let return_ty_ref = self.current_env.read().unwrap().get_reference_by_name(&ty.name).unwrap();
                 Some(return_ty_ref)
             },
             None => None,
@@ -1094,7 +1088,7 @@ impl Evaluator for Interpreter {
         let parent_env = Arc::clone(self.current_env.read().unwrap().parent.as_ref().unwrap());
         self.current_env = parent_env;
 
-        self.current_env.write().unwrap().define(func_sig_syntax.name.clone(), func_sig_ref);
+        self.current_env.write().unwrap().define(func_sig_syntax.name.name.clone(), func_sig_ref);
     }
 
     fn visit_typed_variable_declaration(&mut self, typed_var_decl: &parse_tree::TypedVariableDeclaration) {
@@ -1130,8 +1124,7 @@ impl Evaluator for Interpreter {
     }
 
     fn visit_variable_assignment(&mut self, var_assignment: &parse_tree::VariableAssignment) {
-        self.visit_expression(&var_assignment.target_type);
-        let target_type_reference = self.stack.pop().unwrap().to_ref().unwrap();
+        let target_type_reference = self.current_env.read().unwrap().get_reference_by_name(&var_assignment.target_type.name).unwrap();
         let target_type_heap_reference = target_type_reference.to_heap_ref().unwrap();
 
         self.visit_expression(&var_assignment.value);

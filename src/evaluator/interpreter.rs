@@ -774,9 +774,9 @@ impl Evaluator for Interpreter {
             .fields
             .iter()
             .map(|tvd| {
-                let kh = kind_hash_from_generic_id(&tvd.type_reference, &self.current_env.read().unwrap().deref(), &self.heap);
-                // TODO -> need to  change this from a KindHash to a Reference
-                (tvd.name.clone(), kh)
+                let type_ref = self.current_env.read().unwrap().get_reference_by_name(&tvd.type_reference.name).unwrap();
+                // TODO -> need to apply params to the type
+                (tvd.name.clone(), type_ref)
             })
             .collect();
         

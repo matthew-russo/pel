@@ -17,13 +17,13 @@ impl LocationContext {
 
         LocationContext {
             file: lc1.file.clone(),
-            start_location: minLocation(&lc1.start_location, &lc2.start_location),
-            end_location: maxLocation(&lc1.end_location, &lc2.end_location)
+            start_location: min_location(&lc1.start_location, &lc2.start_location),
+            end_location: max_location(&lc1.end_location, &lc2.end_location)
         }
     }
 }
 
-fn minLocation(fl1: &FileLocation, fl2: &FileLocation) -> FileLocation {
+fn min_location(fl1: &FileLocation, fl2: &FileLocation) -> FileLocation {
     if fl1.line < fl2.line {
         fl1.clone()
     } else if fl2.line > fl1.line {
@@ -37,7 +37,7 @@ fn minLocation(fl1: &FileLocation, fl2: &FileLocation) -> FileLocation {
     }
 }
 
-fn maxLocation(fl1: &FileLocation, fl2: &FileLocation) -> FileLocation {
+fn max_location(fl1: &FileLocation, fl2: &FileLocation) -> FileLocation {
     if fl1.line < fl2.line {
         fl2.clone()
     } else if fl2.line > fl1.line {

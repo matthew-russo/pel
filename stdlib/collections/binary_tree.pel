@@ -1,25 +1,25 @@
-object BinaryTreeNode<<T>> {
+object BinaryTreeNode@(T) {
     fields {
         data: T,
-        left: BinaryTree<<T>>,
-        right: BinaryTree<<T>>,
+        left: BinaryTree@(T),
+        right: BinaryTree@(T),
     }
 }
 
-enum BinaryTree<<T>> {
+enum BinaryTree@(T) {
     variants {
         Empty,
-        Node(BinaryTreeNode<<T>>),
+        Node(BinaryTreeNode@(T)),
     }
 
     methods {
         func insert(self, to_add: T) {
             match self {
                 Empty => {
-                    self: BinaryTree<<T>> := Node(BinaryTreeNode<<T>> {
+                    self: BinaryTree@(T) := Node(BinaryTreeNode@(T) {
                         data: to_add,
-                        left: BinaryTree<<T>>::Empty,
-                        right: BinaryTree<<T>>::Empty,
+                        left: BinaryTree@(T)::Empty,
+                        right: BinaryTree@(T)::Empty,
                     })
                 },
                 Node(n) => {
@@ -51,7 +51,7 @@ enum BinaryTree<<T>> {
             }
         }
 
-        func search(self, to_find: T) -> Option<<BinaryTreeNode<<T>>>> {
+        func search(self, to_find: T) -> Option@(BinaryTreeNode@(T)) {
             match self {
                 Empty => {
                     return Option::None
@@ -69,15 +69,15 @@ enum BinaryTree<<T>> {
         }
 
         // left, root, right
-        func inorder_traversal(self) -> Vec<<T>> {
+        func inorder_traversal(self) -> Vec@(T) {
             match self {
                 Empty => {
-                    return Vecs::empty<<T>>();
+                    return Vecs::empty@(T)();
                 },
                 Node(n) => {
-                    let root: Vec<<T>> = Vecs::singleton<<T>>(self.data);
-                    let left: Vec<<T>> = self.left.inorder_traversal();
-                    let right: Vec<<T>> = self.right.inorder_traversal();
+                    let root: Vec@(T) = Vecs::singleton@(T)(self.data);
+                    let left: Vec@(T) = self.left.inorder_traversal();
+                    let right: Vec@(T) = self.right.inorder_traversal();
 
                     return left.concat(root).concat(right);
                 },
@@ -85,15 +85,15 @@ enum BinaryTree<<T>> {
         }
 
         // root, left, right
-        func preorder_traversal(self) -> Vec<<T>> {
+        func preorder_traversal(self) -> Vec@(T) {
             match self {
                 Empty => {
-                    return Vecs::empty<<T>>();
+                    return Vecs::empty@(T)();
                 },
                 Node(n) => {
-                    let root: Vec<<T>> = Vecs::singleton<<T>>(self.data);
-                    let left: Vec<<T>> = self.left.inorder_traversal();
-                    let right: Vec<<T>> = self.right.inorder_traversal();
+                    let root: Vec@(T) = Vecs::singleton@(T)(self.data);
+                    let left: Vec@(T) = self.left.inorder_traversal();
+                    let right: Vec@(T) = self.right.inorder_traversal();
 
                     return root.concat(left).concat(right);
                 },
@@ -101,15 +101,15 @@ enum BinaryTree<<T>> {
         }
 
         // left, right, root
-        func postorder_traversal(self) -> Vec<<T>> {
+        func postorder_traversal(self) -> Vec@(T) {
             match self {
                 Empty => {
-                    return Vecs::empty<<T>>();
+                    return Vecs::empty@(T)();
                 },
                 Node(n) => {
-                    let root: Vec<<T>> = Vecs::singleton<<T>>(self.data);
-                    let left: Vec<<T>> = self.left.inorder_traversal();
-                    let right: Vec<<T>> = self.right.inorder_traversal();
+                    let root: Vec@(T) = Vecs::singleton@(T)(self.data);
+                    let left: Vec@(T) = self.left.inorder_traversal();
+                    let right: Vec@(T) = self.right.inorder_traversal();
 
                     return left.concat(right).concat(root);
                 },

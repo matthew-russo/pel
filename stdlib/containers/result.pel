@@ -1,4 +1,4 @@
-enum Result<<L, R>> {
+enum Result@(L, R) {
   variants {
     Ok(L),
     Err(R),

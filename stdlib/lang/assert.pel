@@ -1,6 +1,6 @@
 use pel::lang::string;
 
-object AssertionValue<<T>> {
+object AssertionValue@(T) {
   fields {
     input: T,
   }
@@ -14,8 +14,8 @@ object AssertionValue<<T>> {
   }
 }
 
-func assert<<T>>(input: T) -> AssertionValue<<T>>; {
-  return AssertionValue<<T>> {
+func assert@(T)(input: T) -> AssertionValue@(T); {
+  return AssertionValue@(T) {
     input: input,
   };
 }

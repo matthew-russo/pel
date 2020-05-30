@@ -1,4 +1,4 @@
-enum Maybe<<T>> {
+enum Maybe@(T) {
   variants {
     Some(T),
     None,

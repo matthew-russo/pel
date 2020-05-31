@@ -112,14 +112,16 @@ impl Lexer {
         }
     }
 
-    fn snapshot(&mut self) -> (u32, u32, Vec<char>) {
-        return (self.start, self.current, self.lexing.clone());
+    fn snapshot(&mut self) -> (u32, u32, Vec<char>, u32, u32) {
+        return (self.start, self.current, self.lexing.clone(), self.line, self.col);
     }
 
-    fn reset(&mut self, snapshot: (u32, u32, Vec<char>)) {
+    fn reset(&mut self, snapshot: (u32, u32, Vec<char>, u32, u32)) {
         self.start = snapshot.0;
         self.current = snapshot.1;
         self.lexing = snapshot.2;
+        self.line = snapshot.3;
+        self.col = snapshot.4;
     }
 
     fn _lex(&mut self) -> Result<Token, LexError> {
@@ -343,7 +345,7 @@ impl Lexer {
         let current_char = self.current_char();
         return match current_char {
             '\'' => {
-                self.current = self.current + 1;
+                self.advance();
                 let char_lit = self.chomp_until(SINGLE_QUOTE);
 
                 // TODO -> eval char
@@ -357,7 +359,7 @@ impl Lexer {
     fn lex_string_literal(&mut self) -> Result<Token, LexError> {
         return match self.current_char() {
             '"' => {
-                self.current = self.current + 1;
+                self.advance();
                 let string_lit = self.chomp_until(DOUBLE_QUOTE);
                 Ok(Token::from_data(&self, StringLit(string_lit)))
             },
@@ -458,16 +460,19 @@ impl Lexer {
     fn chomp(&mut self) -> char {
         let current_char = self.current_char();
         self.lexing.push(current_char);
+        self.advance();
+        return current_char;
+    }
+
+    fn advance(&mut self) {
         self.current += 1;
 
-        if current_char == '\n' {
+        if self.current_char() == '\n' {
             self.line += 1;
             self.col = 0;
         } else {
             self.col += 1;
         }
-
-        return current_char;
     }
 
     fn current_char(&mut self) -> char {

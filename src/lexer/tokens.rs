@@ -12,11 +12,18 @@ pub(crate) struct Token {
 impl Token {
     pub(crate) fn from_data(lexer: &Lexer, data: TokenData) -> Self{
         let length = lexer.current - lexer.start;
-        assert!(lexer.col >= length);
+
+        let start_location = if (lexer.col as i32 - length as i32) < 0 {
+            // TODO -> we have no way of knowing the lenght of the previous lines. need to actually
+            // deal with lines in a real way
+            FileLocation { line: lexer.line - 1, col: std::u32::MAX }
+        } else {
+            FileLocation { line: lexer.line, col: lexer.col - length }
+        };
 
         let location = LocationContext {
             file: lexer.file.clone(),
-            start_location: FileLocation { line: lexer.line, col: lexer.col - length },
+            start_location,
             end_location: FileLocation { line: lexer.line, col: lexer.col },
         };
 

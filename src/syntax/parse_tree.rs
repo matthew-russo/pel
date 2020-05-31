@@ -8,10 +8,23 @@ pub(crate) struct Program {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct GenericIdentifier {
+pub(crate) enum TypeIdentifier {
+    GenericTypeNode(GenericType),
+    ArrayNode(Box<ArrayType>),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GenericType {
     pub location: LocationContext,
     pub name: String,
-    pub type_parameters: Vec<GenericIdentifier>,
+    pub type_application: Option<TypeApplication>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GenericName {
+    pub location: LocationContext,
+    pub name: String,
+    pub type_parameters: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +62,7 @@ pub(crate) struct ModuleDeclaration {
 #[derive(Debug, Clone)]
 pub(crate) struct EnumDeclaration {
     pub location: LocationContext,
-    pub name: GenericIdentifier,
+    pub name: GenericName,
     pub variants: Vec<VariantDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
 }
@@ -57,7 +70,7 @@ pub(crate) struct EnumDeclaration {
 #[derive(Debug, Clone)]
 pub(crate) struct ObjectDeclaration {
     pub location: LocationContext,
-    pub name: GenericIdentifier,
+    pub name: GenericName,
     pub fields: Vec<TypedVariableDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
 }
@@ -65,15 +78,15 @@ pub(crate) struct ObjectDeclaration {
 #[derive(Debug, Clone)]
 pub(crate) struct ContractDeclaration {
     pub location: LocationContext,
-    pub name: GenericIdentifier,
+    pub name: GenericName,
     pub functions: Vec<FunctionSignature>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplementationDeclaration {
     pub location: LocationContext,
-    pub implementing_type: GenericIdentifier,
-    pub contract: GenericIdentifier,
+    pub implementing_type: GenericName, // TODO
+    pub contract: GenericName, // TODO
     pub functions: Vec<FunctionDeclaration>,
 }
 
@@ -81,7 +94,7 @@ pub(crate) struct ImplementationDeclaration {
 pub(crate) struct VariantDeclaration {
     pub location: LocationContext,
     pub name: String,
-    pub contains: Option<GenericIdentifier>,
+    pub contains: Option<TypeIdentifier>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,9 +119,9 @@ pub(crate) enum Visibility {
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionSignature {
     pub location: LocationContext,
-    pub name: GenericIdentifier,
+    pub name: GenericName,
     pub parameters: Vec<FunctionParameter>,
-    pub returns: Option<GenericIdentifier>
+    pub returns: Option<TypeIdentifier>
 }
 
 #[derive(Debug, Clone)]
@@ -121,7 +134,7 @@ pub(crate) enum FunctionParameter {
 pub(crate) struct TypedVariableDeclaration {
     pub location: LocationContext,
     pub name: String,
-    pub type_reference: GenericIdentifier,
+    pub type_identifier: TypeIdentifier,
 }
 
 #[derive(Debug, Clone)]
@@ -152,7 +165,7 @@ impl Statement {
 pub(crate) struct VariableAssignment {
     pub location: LocationContext,
     pub target: Expression,
-    pub target_type: GenericIdentifier,
+    pub target_type: TypeIdentifier,
     pub value: Expression,
 }
 
@@ -290,7 +303,7 @@ pub(crate) struct ArrayAccess {
 #[derive(Debug, Clone)]
 pub(crate) struct TypeApplication {
     pub location: LocationContext,
-    pub args: Vec<Expression>,
+    pub args: Vec<TypeIdentifier>,
 }
 
 #[derive(Debug, Clone)]
@@ -318,7 +331,7 @@ pub(crate) enum Value {
 #[derive(Debug, Clone)]
 pub(crate) struct ArrayType {
     pub location: LocationContext,
-    pub ty: Expression,
+    pub ty: TypeIdentifier,
 }
 
 #[derive(Debug, Clone)]

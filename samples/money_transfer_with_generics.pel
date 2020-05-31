@@ -11,7 +11,7 @@ contract Functor<A> {
   map<B>(func(A) -> B, Functor<A>) -> Functor<B>;
 }
 
-implement Functor<A> for Maybe<A> {
+implement <A> Functor<A> for Maybe<A> {
   map<B>(fn: func(A) -> B) -> Maybe<B> {
     match self {
       Some(a) => Some(fn(a)),

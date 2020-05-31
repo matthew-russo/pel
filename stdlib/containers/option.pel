@@ -5,7 +5,7 @@ enum Maybe@(T) {
   }
 
   methods {
-    func is_some(self) {
+    func is_some(self) -> bool {
       match self {
         Some(_) => { return true; },
         _ => { return false; },

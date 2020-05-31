@@ -40,3 +40,4 @@ implement Greeter for SpanishGreeter {
     return self.how_to_say_hello + " " + name;
   }
 }
+

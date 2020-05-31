@@ -6,15 +6,15 @@ object Vec@(T) {
   }
 
   methods {
-    func len(self) -> int; {
+    func len(self) -> int {
       return self.len;
     }
 
-    func get(self, i: int) -> T; {
+    func get(self, i: int) -> T {
       return internal[i];
     }
 
-    func set(self, i: int, t: T) -> T; {
+    func set(self, i: int, t: T) -> T {
       let temp: T := self.internal[i];
       let self.internals[i]: T := t;
       return temp;
@@ -35,7 +35,7 @@ object Vec@(T) {
       };
     } 
 
-    func concat(self, other: Self@(T)) -> Self@(T); {
+    func concat(self, other: Self@(T)) -> Self@(T) {
       let to_return: Self@(T) := Vecs::empty();
 
       for let i: int := 0; i < self.len(); let i: int := i + 1; {
@@ -59,7 +59,7 @@ object Vec@(T) {
 }
 
 module Vecs {
-  func empty@(T)() -> Vec@(T); {
+  func empty@(T)() -> Vec@(T) {
     return Vec@(T) {
       internal: [T; 0],
       len: 0,
@@ -67,7 +67,7 @@ module Vecs {
     };
   }
 
-  func singleton@(T)(t: T) -> Vec@(T); {
+  func singleton@(T)(t: T) -> Vec@(T) {
     let v: Vec@(T) := Vecs::empty@(T)();
     v.add(t);
     return v;

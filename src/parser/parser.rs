@@ -125,24 +125,31 @@ impl Parser {
         let name_token = self.expect(IDENTIFIER, "generic_identifier")?;
         let name = Self::extract_identifier(&name_token.data).unwrap();
 
+        println!("parsing gen_id and name is: {:?}", name);
+
         let mut type_parameters = Vec::new();
         let mut end_token = None;
         if let Ok(_t) = self.expect(TokenData::AtSign, "generic_identifier") {
+            println!("got type application on: {:?}", name);
             self.expect(TokenData::OpenParen, "generic_identifier")?;
             type_parameters.push(self.generic_identifier()?);
 
+            println!("beginning to loop on: {:?}", name);
             loop {
                 match self.current_token_data() {
                     TokenData::CloseParen => {
-                        end_token = Some(self.expect(TokenData::GreaterThan, "generic_identifier")?);
+                        println!("got close paren on: {:?}", name);
+                        end_token = Some(self.expect(TokenData::CloseParen, "generic_identifier")?);
                         break;
                     },
                     TokenData::Comma => {
+                        println!("got comma on: {:?}", name);
                         self.expect(TokenData::Comma, "generic_identifier")?;
                         type_parameters.push(self.generic_identifier()?);
                     },
                     t => {
-                        let message = format!("unexpected token: {} while parsing generic_params", t);
+                        println!("got unexpected on: {:?}", name);
+                        let message = format!("unexpected token: {} while parsing generic_identifier", t);
                         panic!(message);
                     }
                 }
@@ -331,6 +338,7 @@ impl Parser {
             functions,
         })
     }
+
 
     fn function_declaration(&mut self) -> Result<FunctionDeclaration, ParseError> {
         let visibility = match self.visibility() {

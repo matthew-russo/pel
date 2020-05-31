@@ -14,7 +14,7 @@ object AssertionValue@(T) {
   }
 }
 
-func assert@(T)(input: T) -> AssertionValue@(T); {
+func assert@(T)(input: T) -> AssertionValue@(T) {
   return AssertionValue@(T) {
     input: input,
   };

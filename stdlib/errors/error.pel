@@ -1,5 +1,5 @@
 use pel::lang::string;
 
 contract Error {
-  func error() -> String;;
+  func error() -> String;
 }

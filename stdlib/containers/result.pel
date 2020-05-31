@@ -5,14 +5,14 @@ enum Result@(L, R) {
   }
 
   methods {
-    func is_ok(self) -> bool; {
+    func is_ok(self) -> bool {
       match self {
         Ok(_) => { return true; },
         _ => { return false; },
       };
     }
 
-    func is_err(self) -> bool; {
+    func is_err(self) -> bool {
       match self {
         Err(_) => { return true; },
         _ => { return false; },

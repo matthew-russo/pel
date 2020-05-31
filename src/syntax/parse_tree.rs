@@ -10,7 +10,16 @@ pub(crate) struct Program {
 #[derive(Debug, Clone)]
 pub(crate) enum TypeIdentifier {
     GenericTypeNode(GenericType),
-    ArrayNode(Box<ArrayType>),
+    ArrayTypeNode(Box<ArrayType>),
+}
+
+impl TypeIdentifier {
+    pub(crate) fn location(&self) -> LocationContext {
+        match self {
+            TypeIdentifier::GenericTypeNode(gt) => gt.location.clone(),
+            TypeIdentifier::ArrayTypeNode(at) => at.location.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -774,7 +774,7 @@ impl Evaluator for Interpreter {
             .fields
             .iter()
             .map(|tvd| {
-                let type_ref = self.current_env.read().unwrap().get_reference_by_name(&tvd.type_reference.name).unwrap();
+                let type_ref = self.current_env.read().unwrap().get_reference_by_name(&tvd.type_identifier.name).unwrap();
                 // TODO -> need to apply params to the type
                 (tvd.name.clone(), type_ref)
             })

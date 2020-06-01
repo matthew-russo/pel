@@ -433,7 +433,6 @@ impl Interpreter {
         }
     }
 
-
     fn scalar_binary_operation(&self, lhs: Scalar, rhs: Scalar, bin_op: &parse_tree::BinaryOperator) -> Scalar {
         match bin_op {
             parse_tree::BinaryOperator::Plus =>               Scalar::add(lhs, rhs),
@@ -547,6 +546,46 @@ impl Evaluator for Interpreter {
 
         for decl in program.declarations.iter() {
             self.visit_declaration(decl);
+        }
+    }
+
+    // object MyObject<T> {
+    //   fields {
+    //     inner: T,
+    //     things: Map@(String, Vec@(User)),
+    //   }
+    // }
+    //
+    // let myMap: Map@(String, Vec@(User)) := createMyMap();
+    // 
+    // 05/31/20 - This is all wrong and it exposes some deeper issues with having
+    // Types as Values. Previously, I implemented TypeApplication as something that
+    // creates an "Instance" of the Type, and defines the names of the TypeParameters
+    // to point to references of the types that are passed in as arguments. While
+    // this works great for inline expressions and function calls, it doesn't work
+    // with type declarations on fields or variables (see above).
+    //
+    // To get around this, I think I should refactor TypeApplication back to working
+    // at the level of Kinds, rather than working at the level of Items and instances
+    // of those Kinds.
+    //
+    fn visit_type_identifier(&mut self, type_identifier: &TypeIdentifier) {
+        match type_identifier {
+            TypeIdentifier::ArrayTypeNode(at) => {
+                // TODO -> this is duplication in evaluator.rs:Array::kind_hash:90
+                self.visit_type_identifier(&at.ty);
+                let type_ref = self.stack.pop().unwrap().to_ref().unwrap();
+                let arr_kh = KindHash::from(format!("[{}]", arr_ty));
+                
+            },
+            TypeIdentifier::GenericTypeNode(gt) => {
+                let ty_ref = self.current_env.read().unwrap().get_reference_by_name(&gt.name).unwrap();
+                self.stack.push(Value::Reference(ty_ref));
+
+                if let Some(type_app) = gt.type_application {
+                    self.visit_type_application(type_app);
+                }
+            },
         }
     }
 
@@ -1194,9 +1233,9 @@ impl Evaluator for Interpreter {
                 }
             },
             ArrayType(ref arr_ty) => {
-                self.visit_expression(&arr_ty.ty);
+                let arr_ty = self.resolve_type_identifier(arr_ty.ty);
                 let arr = Arc::new(RwLock::new(Array {
-                    ty: self.stack.pop().unwrap().get_ty(),
+                    ty: arr_ty,
                 }));
                 self.kind_table.create(&self.heap, Kind::Array(Arc::clone(&arr)));
                 let arr_kind_hash = arr.read().unwrap().kind_hash(&self.kind_table, &self.heap);
@@ -1207,7 +1246,6 @@ impl Evaluator for Interpreter {
                 unimplemented!("array initialization");
             }
         };
-
 
         for expr_chain in chainable_expr.chained.iter() {
             match expr_chain {

@@ -1078,6 +1078,7 @@ fn extract_type_variable_name(kind_hash: &KindHash) -> Option<String> {
 // there is probably a better abstraction for this
 pub(crate) trait Evaluator {
     fn visit_program(&mut self, program: &Program, module_chain: &Vec<String>);
+    fn visit_type_identifier(&mut self, type_identifier: &TypeIdentifier);
     fn visit_declaration(&mut self, declaration: &Declaration);
     fn visit_module_declaration(&mut self, mod_decl: &ModuleDeclaration);
     fn visit_enum_declaration(&mut self, enum_decl: &EnumDeclaration);

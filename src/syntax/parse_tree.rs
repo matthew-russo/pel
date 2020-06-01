@@ -9,8 +9,8 @@ pub(crate) struct Program {
 
 #[derive(Debug, Clone)]
 pub(crate) enum TypeIdentifier {
-    GenericTypeNode(GenericType),
     ArrayTypeNode(Box<ArrayType>),
+    GenericTypeNode(GenericType),
 }
 
 impl TypeIdentifier {
